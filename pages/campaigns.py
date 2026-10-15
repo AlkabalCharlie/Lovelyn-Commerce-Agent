@@ -1,9 +1,10 @@
-"""Campaigns page: Generate and approve promotional drafts."""
+"""Campaigns page: Generate, approve, and publish promotional drafts."""
 import streamlit as st
 
 from database.repositories import ProductRepository, CampaignRepository
-from models.campaign import Campaign, VALID_CAMPAIGN_STATUSES
+from models.campaign import Campaign
 from services.campaign_generator import generate_campaign
+from services.content_formatter import format_campaign
 
 st.title("Campaigns")
 st.caption("Generate promotional angles for your high-scoring products and manage their approval status.")
@@ -11,7 +12,6 @@ st.caption("Generate promotional angles for your high-scoring products and manag
 prod_repo = ProductRepository()
 camp_repo = CampaignRepository()
 
-# 1. Select a product
 products = prod_repo.list_products()
 if not products:
     st.info("No products found. Go to the Products page to add some first.")
@@ -23,32 +23,21 @@ selected_product = product_options[selected_product_name]
 
 st.divider()
 
-# 2. Generate a new campaign draft
 st.subheader("Generate New Draft")
 col1, col2 = st.columns([2, 1])
 with col1:
     angle = st.selectbox("Choose Promotional Angle:", ["Review", "Comparison", "Promo", "Story", "General"])
 with col2:
-    st.write("") # Spacer
-    st.write("") # Spacer
+    st.write(""); st.write("")
     if st.button("Generate Draft", type="primary"):
         data = generate_campaign(selected_product.name, selected_product.merchant, angle)
-        new_camp = Campaign(
-            product_id=selected_product.id,
-            campaign_type=data["type"],
-            headline=data["headline"],
-            body=data["body"]
-        )
-        camp_id = camp_repo.save_campaign(new_camp)
-        try:
-            prod_repo.add_observation(selected_product.id, "campaign_generation", f"Generated {data['type']} campaign.", selected_product.url, "high")
-        except Exception: pass
-        st.success(f"Draft generated and saved! (ID: {camp_id[:8]})")
+        new_camp = Campaign(product_id=selected_product.id, campaign_type=data["type"], headline=data["headline"], body=data["body"])
+        camp_repo.save_campaign(new_camp)
+        st.success("Draft generated!")
         st.rerun()
 
 st.divider()
 
-# 3. List and manage existing campaigns
 st.subheader(f"Drafts for: {selected_product.name}")
 campaigns = camp_repo.list_campaigns_for_product(selected_product.id)
 
@@ -58,16 +47,35 @@ else:
     for camp in campaigns:
         with st.container(border=True):
             st.markdown(f"**{camp.headline}**")
-            st.caption(f"Type: {camp.campaign_type} | Created: {camp.created_at:%Y-%m-%d}")
+            st.caption(f"Type: {camp.campaign_type} | Status: **{camp.status.upper()}**")
             st.write(camp.body)
             
-            new_status = st.selectbox(
-                "Status",
-                VALID_CAMPAIGN_STATUSES,
-                index=VALID_CAMPAIGN_STATUSES.index(camp.status),
-                key=f"camp_status_{camp.id}",
-                label_visibility="collapsed"
-            )
-            if new_status != camp.status:
-                camp_repo.update_campaign_status(camp.id, new_status)
-                st.rerun()
+            if camp.status == "draft":
+                new_status = st.selectbox("Change Status", ["draft", "approved", "rejected"], key=f"status_{camp.id}")
+                if new_status != camp.status:
+                    camp_repo.update_campaign_status(camp.id, new_status)
+                    st.rerun()
+                    
+            elif camp.status == "approved":
+                st.success("✅ Approved for Publishing")
+                with st.expander("📢 Publishing Studio"):
+                    target_format = st.selectbox("Format", ["Blog Post", "Social Thread", "Newsletter"], key=f"fmt_{camp.id}")
+                    formatted_content = format_campaign(camp.campaign_type, camp.headline, camp.body, target_format)
+                    st.code(formatted_content, language="markdown")
+                    
+                    # Download button acts as the "Publish" action
+                    if st.download_button(
+                        label="Download & Publish",
+                        data=formatted_content,
+                        file_name=f"{camp.headline.replace(' ', '_')}.md",
+                        mime="text/markdown",
+                        key=f"pub_{camp.id}"
+                    ):
+                        camp_repo.publish_campaign(camp.id)
+                        try:
+                            prod_repo.add_observation(selected_product.id, "publication", f"Published as {target_format}.", selected_product.url, "high")
+                        except Exception: pass
+                        st.rerun()
+                        
+            elif camp.status == "published":
+                st.info("🚀 Published. This asset is live in your records.")

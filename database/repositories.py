@@ -87,3 +87,15 @@ class CampaignRepository:
         with engine.begin() as connection:
             result = connection.execute(text("UPDATE campaigns SET status = :status WHERE id = :id"), {"status": status, "id": campaign_id})
             return result.rowcount == 1
+
+    def publish_campaign(self, campaign_id: str) -> bool:
+        """
+        Strict publishing gate: Only 'approved' campaigns can be marked as 'published'.
+        Returns True if successful, False otherwise.
+        """
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("UPDATE campaigns SET status = 'published' WHERE id = :id AND status = 'approved'"),
+                {"id": campaign_id}
+            )
+            return result.rowcount == 1
