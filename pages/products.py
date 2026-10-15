@@ -11,6 +11,7 @@ from models.product import (
 )
 from services.merchant_identifier import identify_merchant
 from services.product_extractor import extract_product_data
+from services.opportunity_scorer import calculate_opportunity_score
 
 st.title("Products")
 st.caption(
@@ -40,11 +41,9 @@ if submitted:
             product_id = repo.add(product)
             try:
                 repo.add_observation(
-                    product_id,
-                    "extraction",
+                    product_id, "extraction",
                     f"Automated extraction succeeded. Title: {final_name}",
-                    product.url,
-                    "high",
+                    product.url, "high",
                 )
             except Exception as obs_exc:
                 print(f"Observation save failed: {obs_exc}")
@@ -53,22 +52,16 @@ if submitted:
             st.error(f"Security block: {exc}")
         except ExtractionError as exc:
             st.warning(f"Extraction failed: {exc}. Saving with manual fallback.")
-            fallback_name = (
-                manual_name.strip()
-                if manual_name.strip()
-                else "Manual Entry (Extraction Failed)"
-            )
+            fallback_name = manual_name.strip() if manual_name.strip() else "Manual Entry (Extraction Failed)"
             try:
                 fallback_product = Product(url=url, name=fallback_name, revenue_model=model)
                 fallback_product.merchant = merchant
                 fallback_id = repo.add(fallback_product)
                 try:
                     repo.add_observation(
-                        fallback_id,
-                        "extraction_failure",
+                        fallback_id, "extraction_failure",
                         f"Automated extraction failed or was refused: {exc}",
-                        fallback_product.url,
-                        "high",
+                        fallback_product.url, "high",
                     )
                 except Exception as obs_exc:
                     print(f"Observation save failed: {obs_exc}")
@@ -115,6 +108,14 @@ else:
             c_info.markdown(f"**{product.name}**")
             c_info.caption(product.url)
             c_info.caption(f"Model: {product.revenue_model} | Merchant: {product.merchant}")
+            
+            if product.opportunity_score is not None:
+                if product.opportunity_score >= 70:
+                    c_info.success(f"🏆 Score: {product.opportunity_score}/100")
+                elif product.opportunity_score >= 40:
+                    c_info.warning(f"📊 Score: {product.opportunity_score}/100")
+                else:
+                    c_info.error(f"📉 Score: {product.opportunity_score}/100")
 
             new_status = c_status.selectbox(
                 "Status",
@@ -130,3 +131,27 @@ else:
                     st.error("Could not update the status. Technical details are in the server log.")
                     print(f"Status update failed: {exc}")
                 st.rerun()
+                
+            c_score_btn, c_reasoning = st.columns([1, 4])
+            if c_score_btn.button("Generate Score", key=f"score_btn_{product.id}"):
+                has_data = bool(product.image_url and product.name != "Manual Entry (Extraction Failed)")
+                score, reasoning = calculate_opportunity_score(product.merchant, product.revenue_model, has_data)
+                try:
+                    repo.update_score(product.id, score, reasoning)
+                    try:
+                        repo.add_observation(
+                            product.id, "scoring",
+                            f"Generated opportunity score: {score}/100",
+                            product.url, "high"
+                        )
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    st.error("Could not save the score. Technical details are in the server log.")
+                    print(f"Score save failed: {exc}")
+                st.rerun()
+                
+            if product.score_reasoning:
+                with st.expander("View Score Reasoning"):
+                    for line in product.score_reasoning.split("\n"):
+                        st.markdown(line)

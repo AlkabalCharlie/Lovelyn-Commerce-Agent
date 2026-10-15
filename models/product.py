@@ -13,7 +13,6 @@ class ProductValidationError(ValueError):
 
 
 def validate_product_url(url: str) -> str:
-    """Return the cleaned URL if it is an absolute http/https URL."""
     if not isinstance(url, str):
         raise ProductValidationError("URL must be text.")
     cleaned = url.strip()
@@ -47,6 +46,8 @@ class Product:
     status: str = "new"
     merchant: str = "Unknown"
     image_url: Optional[str] = None
+    opportunity_score: Optional[int] = None
+    score_reasoning: Optional[str] = None
     id: Optional[str] = None
     created_at: Optional[datetime] = None
 
