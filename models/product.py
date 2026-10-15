@@ -45,6 +45,8 @@ class Product:
     name: str
     revenue_model: str
     status: str = "new"
+    merchant: str = "Unknown"
+    image_url: Optional[str] = None
     id: Optional[str] = None
     created_at: Optional[datetime] = None
 
