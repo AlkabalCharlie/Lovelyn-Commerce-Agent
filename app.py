@@ -1,5 +1,6 @@
 import streamlit as st
 
+from core.security import require_login, render_sign_out
 from database.connection import test_db_connection
 
 st.set_page_config(
@@ -50,6 +51,11 @@ def overview_page() -> None:
     else:
         st.error("❌ Database Connection Failed")
 
+
+if not require_login():
+    st.stop()
+
+render_sign_out()
 
 overview = st.Page(overview_page, title="Overview", icon="📊", default=True)
 products = st.Page("pages/products.py", title="Products", icon="📦")

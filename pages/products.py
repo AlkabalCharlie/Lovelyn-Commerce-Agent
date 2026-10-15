@@ -45,7 +45,12 @@ with col_status:
         "Status filter", ["all"] + list(VALID_STATUSES), key="product_status_filter"
     )
 
-products = repo.list_products(search=search, status=status_filter)
+try:
+    products = repo.list_products(search=search, status=status_filter)
+except Exception as exc:
+    products = []
+    st.error("Could not load products from the database. Technical details are in the server log.")
+    print(f"Product list failed: {exc}")
 
 if not products:
     st.info("No products match yet. Submit your first one above.")
@@ -66,5 +71,9 @@ else:
                 label_visibility="collapsed",
             )
             if new_status != product.status:
-                repo.update_status(product.id, new_status)
+                try:
+                    repo.update_status(product.id, new_status)
+                except Exception as exc:
+                    st.error("Could not update the status. Technical details are in the server log.")
+                    print(f"Status update failed: {exc}")
                 st.rerun()
