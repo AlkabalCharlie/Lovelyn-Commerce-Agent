@@ -1,5 +1,4 @@
 import streamlit as st
-
 from core.security import require_login, render_sign_out
 from database.connection import test_db_connection
 
@@ -27,6 +26,7 @@ render_sign_out()
 overview = st.Page(overview_page, title="Overview", icon="📊", default=True)
 products = st.Page("pages/products.py", title="Products", icon="📦")
 campaigns = st.Page("pages/campaigns.py", title="Campaigns", icon="📢")
+agent_logs = st.Page("pages/agent_logs.py", title="Agent Logs", icon="🤖")
 
-nav = st.navigation([overview, products, campaigns])
+nav = st.navigation([overview, products, campaigns, agent_logs])
 nav.run()
