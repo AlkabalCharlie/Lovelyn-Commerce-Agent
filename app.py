@@ -1,8 +1,10 @@
 import streamlit as st
+
 from core.security import require_login, render_sign_out
 from database.connection import test_db_connection
 
 st.set_page_config(page_title="Lovelyn | Commerce Intelligence", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
+
 
 def overview_page() -> None:
     st.title("Lovelyn")
@@ -18,6 +20,7 @@ def overview_page() -> None:
     if test_db_connection(): st.success("✅ Database Connected (Supabase)")
     else: st.error("❌ Database Connection Failed")
 
+
 if not require_login():
     st.stop()
 
@@ -26,7 +29,8 @@ render_sign_out()
 overview = st.Page(overview_page, title="Overview", icon="📊", default=True)
 products = st.Page("pages/products.py", title="Products", icon="📦")
 campaigns = st.Page("pages/campaigns.py", title="Campaigns", icon="📢")
+traffic = st.Page("pages/traffic.py", title="Traffic", icon="📈")
 agent_logs = st.Page("pages/agent_logs.py", title="Agent Logs", icon="🤖")
 
-nav = st.navigation([overview, products, campaigns, agent_logs])
+nav = st.navigation([overview, products, campaigns, traffic, agent_logs])
 nav.run()

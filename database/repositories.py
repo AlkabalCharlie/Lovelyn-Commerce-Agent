@@ -1,4 +1,4 @@
-"""Database access for products, observations, campaigns, and agent logs."""
+"""Database access for products, observations, campaigns, events, and agent logs."""
 from typing import List
 
 from sqlalchemy import text
@@ -79,11 +79,30 @@ class CampaignRepository:
         with engine.begin() as connection:
             result = connection.execute(text("UPDATE campaigns SET status = 'published' WHERE id = :id AND status = 'approved'"), {"id": campaign_id})
             return result.rowcount == 1
-            
+
     def get_all_campaigns_by_status(self, status: str) -> List[Campaign]:
         with engine.connect() as connection:
             rows = connection.execute(text("SELECT id, product_id, campaign_type, headline, body, status, created_at FROM campaigns WHERE status = :status ORDER BY created_at ASC"), {"status": status}).mappings().all()
         return [Campaign(id=str(r["id"]), product_id=r["product_id"], campaign_type=r["campaign_type"], headline=r["headline"], body=r["body"], status=r["status"], created_at=r["created_at"]) for r in rows]
+
+    def list_published_campaigns(self) -> List[dict]:
+        with engine.connect() as connection:
+            rows = connection.execute(text(
+                "SELECT c.id, c.headline, c.body, c.campaign_type, p.name AS product_name, "
+                "p.url AS product_url, p.merchant FROM campaigns c "
+                "JOIN products p ON p.id = c.product_id "
+                "WHERE c.status = 'published' ORDER BY c.created_at DESC")).mappings().all()
+        return [dict(r) for r in rows]
+
+    def get_traffic_stats(self) -> List[dict]:
+        with engine.connect() as connection:
+            rows = connection.execute(text(
+                "SELECT c.id, c.headline, c.status, "
+                "COUNT(*) FILTER (WHERE e.event_type = 'view') AS views, "
+                "COUNT(*) FILTER (WHERE e.event_type = 'click') AS clicks "
+                "FROM campaigns c LEFT JOIN page_events e ON e.campaign_id = c.id "
+                "GROUP BY c.id, c.headline, c.status ORDER BY views DESC")).mappings().all()
+        return [dict(r) for r in rows]
 
 
 class AgentLogRepository:
@@ -93,7 +112,7 @@ class AgentLogRepository:
                 text("INSERT INTO agent_logs (action_type, details) VALUES (:action_type, :details)"),
                 {"action_type": action_type, "details": details}
             )
-            
+
     def get_recent_logs(self, limit: int = 50) -> List[dict]:
         with engine.connect() as connection:
             rows = connection.execute(text("SELECT action_type, details, created_at FROM agent_logs ORDER BY created_at DESC LIMIT :limit"), {"limit": limit}).mappings().all()

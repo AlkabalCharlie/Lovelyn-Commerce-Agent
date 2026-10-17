@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Manual Entry (Extraction Failed) Changed the Game</title><style>body{font-family:system-ui,sans-serif;margin:0;background:#f7f8fa;color:#111}.wrap{max-width:720px;margin:0 auto;padding:32px 20px}a.cta{display:inline-block;margin-top:24px;padding:12px 22px;background:#0f6f5c;color:#fff;border-radius:8px;text-decoration:none}h1{line-height:1.25}</style></head>
+<body><div class="wrap">
+<h1>How Manual Entry (Extraction Failed) Changed the Game</h1>
+<p><em>Etsy &middot; Manual Entry (Extraction Failed)</em></p>
+<p>Read the story of how a complete beginner used Manual Entry (Extraction Failed) to overcome their biggest hurdle. It&#x27;s not just a product; it&#x27;s a proven system.</p>
+<a class="cta" data-track="1" href="https://www.etsy.com/listing/1499787117/hand-knit-vest-v-neck-vest-minimal-knit?ls=s&amp;sr_prefetch=1&amp;pf_from=search&amp;ref=search2_top_narrowing_intent_modules_etsys_pick-2&amp;content_source=EuNJc6hxqSTVXz1IMuqUzGxOJS61%253ALTdec7a9f9259592af279faec01643abc550813fa5&amp;logging_key=EuNJc6hxqSTVXz1IMuqUzGxOJS61%3ALTdec7a9f9259592af279faec01643abc550813fa5&amp;utm_source=lovelyn&amp;utm_medium=campaign&amp;utm_campaign=fea69bf2" rel="nofollow sponsored noopener" target="_blank">View the product &rarr;</a>
+</div>
+<script>
+(function(){
+  var rest = "https://eihklkjyrywaalwuierv.supabase.co";
+  var key = "A00vVnTRkXwynbGcDkzfjA_2tpOtmkl";
+  var cid = "fea69bf2-e906-45d8-97aa-cba058421a50";
+  function send(type){
+    try{
+      fetch(rest + "/rest/v1/page_events", {
+        method: "POST",
+        headers: {"apikey": key, "Authorization": "Bearer " + key,
+                  "Content-Type": "application/json", "Prefer": "return=minimal"},
+        body: JSON.stringify({campaign_id: cid, event_type: type, page_url: location.href})
+      }).catch(function(){});
+    }catch(e){}
+  }
+  send("view");
+  document.addEventListener("click", function(ev){
+    var a = ev.target.closest ? ev.target.closest("a[data-track]") : null;
+    if (a) { send("click"); }
+  }, true);
+})();
+</script>
+</body></html>

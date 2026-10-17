@@ -22,8 +22,7 @@ def _get_setting(name: str, default: str = None) -> str:
 SUPABASE_USERNAME = _get_setting("SUPABASE_USERNAME")
 SUPABASE_HOST = _get_setting("SUPABASE_HOST")
 SUPABASE_PASSWORD = _get_setting("SUPABASE_PASSWORD")
+SUPABASE_ANON_KEY = _get_setting("SUPABASE_ANON_KEY")
 APP_PASSWORD = _get_setting("APP_PASSWORD")
 
-# Full certificate verification is ON by default. It may be relaxed where the
-# Supabase pooler endpoint cannot be verified (documented limitation).
 SSL_VERIFY = str(_get_setting("LOVELYN_SSL_VERIFY", "true")).lower() == "true"

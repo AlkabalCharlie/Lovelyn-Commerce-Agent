@@ -1,11 +1,12 @@
 name: Daily Autonomous Grind
 
 on:
-  # Run automatically every day at 08:00 UTC
   schedule:
     - cron: '0 8 * * *'
-  # Allow manual triggering from the GitHub Actions tab
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   run-agent:
@@ -29,6 +30,15 @@ jobs:
           SUPABASE_USERNAME: ${{ secrets.SUPABASE_USERNAME }}
           SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
           SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           LOVELYN_SSL_VERIFY: ${{ secrets.LOVELYN_SSL_VERIFY }}
         run: python run_agent.py
+
+      - name: Commit rebuilt traffic site
+        run: |
+          git config user.name "lovelyn-agent"
+          git config user.email "agent@users.noreply.github.com"
+          git add docs
+          git diff --cached --quiet || git commit -m "chore: rebuild traffic site"
+          git push
