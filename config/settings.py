@@ -26,3 +26,11 @@ SUPABASE_ANON_KEY = _get_setting("SUPABASE_ANON_KEY")
 APP_PASSWORD = _get_setting("APP_PASSWORD")
 
 SSL_VERIFY = str(_get_setting("LOVELYN_SSL_VERIFY", "true")).lower() == "true"
+
+# Owner throttle: "full" = agent approves and publishes on its own (default).
+# Set to "gated" any time to make new campaigns wait as drafts.
+AGENT_AUTONOMY = _get_setting("AGENT_AUTONOMY", "full").lower()
+
+SITE_BASE_URL = _get_setting(
+    "SITE_BASE_URL", "https://alkabalcharlie.github.io/Lovelyn-Commerce-Agent/"
+)

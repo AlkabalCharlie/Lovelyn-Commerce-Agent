@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://alkabalcharlie.github.io/Lovelyn-Commerce-Agent/sitemap.xml

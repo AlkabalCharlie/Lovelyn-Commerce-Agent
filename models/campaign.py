@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-VALID_CAMPAIGN_STATUSES = ("draft", "approved", "rejected", "published")
+VALID_CAMPAIGN_STATUSES = ("draft", "approved", "rejected", "published", "archived")
+
 
 @dataclass
 class Campaign:
