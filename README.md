@@ -3,52 +3,57 @@
 A cloud-based personal commerce intelligence platform that identifies,
 evaluates, promotes, and monetizes legitimate product opportunities.
 Two revenue streams are tracked separately: affiliate commissions and
-owned-product profit. Estimates are never reported as earned money.
+owned-product profit. **Estimates are never reported as earned money.**
 
 ## Local setup (Windows)
 
 1. Install Python 3.10+ and VS Code.
 2. Open this folder in VS Code and open the terminal.
-3. Create and activate a virtual environment (optional but recommended):
-   - `python -m venv venv`
-   - `.\venv\Scripts\activate`
-4. Install dependencies: `pip install -r requirements.txt`
-5. Copy `.env.example` to `.env` and fill in real values.
-6. Run tests: `python -m pytest tests -q`
-7. Run the app: `python -m streamlit run app.py`
+3. Install dependencies: `pip install -r requirements.txt`
+4. Copy `.env.example` to `.env` and fill in real values.
+5. Run tests: `python -m pytest tests -q`
+6. Run the app: `python -m streamlit run app.py`
 
 ## Environment variables
 
 See `.env.example`. Locally they live in `.env` (never committed).
-In Streamlit Community Cloud they live in app Secrets (same names).
+In Streamlit Community Cloud they live in app Secrets; in GitHub Actions
+they live in repository Secrets (same names).
 
 ## Deployment
 
-- Repository: private GitHub repository.
-- Dashboard: Streamlit Community Cloud (free tier), main file `app.py`.
-- Database: Supabase PostgreSQL (free tier), schema managed via SQL migrations.
+- Repository: public GitHub repository (required for free Streamlit Cloud and GitHub Pages).
+- Dashboard: Streamlit Community Cloud (free tier), main file `app.py`, password-gated.
+- Public campaign site: GitHub Pages from the `docs/` folder, rebuilt daily by the agent.
+- Database: Supabase PostgreSQL (free tier); Row-Level Security enabled on all tables.
+- Autonomous agent: GitHub Actions cron, daily at 08:00 UTC.
 
 ## Implementation checklist
 
-- [x] Phase 1 — Cloud-ready foundation (dashboard live on Streamlit Cloud)
-- [x] Phase 2 — Persistent storage (Supabase, products CRUD, search/filter/status)
-- [x] Phase 2 close-out — password gate, error hardening, tests, README
-- [ ] Phase 3 — Product intelligence (safe URL intake, merchant ID, extraction)
-- [ ] Phase 4 — Opportunity research and scoring
-- [ ] Phase 5 — Campaign generation and approval
-- [ ] Phase 6 — Authorized publishing
-- [ ] Phase 7 — Scheduling and autonomous research
-- [ ] Phase 8 — Analytics and financial reconciliation
-- [ ] Phase 9 — Controlled optimization
+- [x] Phase 1 — Cloud-ready foundation
+- [x] Phase 2 — Persistent storage + password gate
+- [x] Phase 3 — Product intelligence (safe intake, merchant ID, extraction, provenance)
+- [x] Phase 4 — Explainable opportunity scoring
+- [x] Phase 5 — Campaign generation and approval
+- [x] Phase 6 — Authorized publishing and export
+- [x] Phase 7 — Autonomous heartbeat (daily agent, GitHub Actions)
+- [x] Phase 8.1 — Traffic engine (live pages, view/click tracking)
+- [x] Phase 8.2 — Finance tracking (received money only) + kill/scale rules
+- [ ] Phase 9 — Controlled optimization and scaling
+
+## Financial integrity rules
+
+- Only received money is logged, with a proof note.
+- Affiliate and owned streams are never mixed.
+- All money math uses integer cents.
+- Targets are weekly: $50 affiliate + $50 owned = $100 combined.
 
 ## Known limitations
 
-- Supabase pooler endpoint does not pass strict TLS certificate verification
-  from some networks (including Streamlit Cloud). Where required,
-  `LOVELYN_SSL_VERIFY=false` keeps the connection encrypted
-  (sslmode=require equivalent) without chain verification. Revisit during
-  security hardening (direct endpoint or Supabase HTTPS API).
-- The dashboard password gate is a single-owner interim measure until a
-  full authentication phase is implemented.
-- Streamlit Community Cloud apps sleep when idle; background work will use
-  scheduled jobs (Phase 7), not an always-on worker.
+- Some merchants (Etsy, Payhip, etc.) refuse automated fetching; Lovelyn
+  respects refusals and uses manual fallback. Official merchant APIs are
+  the planned authorized route per merchant.
+- Supabase pooler TLS cannot be verified from some networks; where needed,
+  `LOVELYN_SSL_VERIFY=false` keeps encryption on (sslmode=require equivalent).
+- Dashboard authentication is a single-owner password gate until a full
+  multi-user auth phase.

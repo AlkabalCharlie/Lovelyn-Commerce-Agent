@@ -1,4 +1,5 @@
-"""Database access for products, observations, campaigns, events, and agent logs."""
+"""Database access for products, campaigns, events, finance, and agent logs."""
+from datetime import date
 from typing import List
 
 from sqlalchemy import text
@@ -6,6 +7,7 @@ from sqlalchemy import text
 from database.connection import engine
 from models.product import Product, validate_status
 from models.campaign import Campaign, VALID_CAMPAIGN_STATUSES
+from models.finance import FinancialEvent
 
 
 class ProductRepository:
@@ -97,11 +99,50 @@ class CampaignRepository:
     def get_traffic_stats(self) -> List[dict]:
         with engine.connect() as connection:
             rows = connection.execute(text(
-                "SELECT c.id, c.headline, c.status, "
+                "SELECT c.id, c.headline, c.status, c.product_id, c.agent_flag, c.created_at, "
+                "p.name AS product_name, p.merchant, "
                 "COUNT(*) FILTER (WHERE e.event_type = 'view') AS views, "
                 "COUNT(*) FILTER (WHERE e.event_type = 'click') AS clicks "
-                "FROM campaigns c LEFT JOIN page_events e ON e.campaign_id = c.id "
-                "GROUP BY c.id, c.headline, c.status ORDER BY views DESC")).mappings().all()
+                "FROM campaigns c "
+                "JOIN products p ON p.id = c.product_id "
+                "LEFT JOIN page_events e ON e.campaign_id = c.id "
+                "GROUP BY c.id, c.headline, c.status, c.product_id, c.agent_flag, c.created_at, p.name, p.merchant "
+                "ORDER BY views DESC")).mappings().all()
+        return [dict(r) for r in rows]
+
+    def set_agent_flag(self, campaign_id: str, flag: str) -> bool:
+        with engine.begin() as connection:
+            result = connection.execute(text("UPDATE campaigns SET agent_flag = :flag WHERE id = :id"), {"flag": flag, "id": campaign_id})
+            return result.rowcount == 1
+
+
+class FinanceRepository:
+    def add_event(self, event: FinancialEvent) -> str:
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("INSERT INTO financial_events (stream, amount_cents, source, note, received_at) "
+                     "VALUES (:stream, :amount_cents, :source, :note, :received_at) RETURNING id"),
+                {"stream": event.stream, "amount_cents": event.amount_cents, "source": event.source,
+                 "note": event.note, "received_at": event.received_at},
+            )
+            return str(result.scalar_one())
+
+    def sum_by_stream_since(self, since: date) -> dict:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT stream, COALESCE(SUM(amount_cents), 0) AS total_cents "
+                     "FROM financial_events WHERE received_at >= :since GROUP BY stream"),
+                {"since": since},
+            ).mappings().all()
+        return {row["stream"]: int(row["total_cents"]) for row in rows}
+
+    def list_recent(self, limit: int = 20) -> List[dict]:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT stream, amount_cents, source, note, received_at FROM financial_events "
+                     "ORDER BY received_at DESC, created_at DESC LIMIT :limit"),
+                {"limit": limit},
+            ).mappings().all()
         return [dict(r) for r in rows]
 
 
