@@ -46,6 +46,9 @@ class Product:
     status: str = "new"
     merchant: str = "Unknown"
     image_url: Optional[str] = None
+    description: Optional[str] = None
+    price: Optional[str] = None
+    enrich_attempted: bool = False
     opportunity_score: Optional[int] = None
     score_reasoning: Optional[str] = None
     id: Optional[str] = None

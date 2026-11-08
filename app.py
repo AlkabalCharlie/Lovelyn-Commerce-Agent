@@ -6,6 +6,11 @@ from core.security import require_login, render_sign_out
 from database.connection import test_db_connection
 from database.repositories import FinanceRepository
 from models.finance import format_cents
+from config.settings import (
+    AFFILIATE_WEEKLY_TARGET_CENTS,
+    OWNED_WEEKLY_TARGET_CENTS,
+    COMBINED_MONTHLY_TARGET_CENTS,
+)
 
 st.set_page_config(page_title="Lovelyn | Commerce Intelligence", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
@@ -17,20 +22,21 @@ def overview_page() -> None:
 
     st.header("Executive Overview")
     fin = FinanceRepository()
-    totals = fin.sum_by_stream_since(date.today() - timedelta(days=7))
+    week_ago = date.today() - timedelta(days=7)
+    totals = fin.sum_by_stream_since(week_ago)
     aff = totals.get("affiliate", 0)
     own = totals.get("owned", 0)
 
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Affiliate Received (7 days)", format_cents(aff), help="Verified received commissions, last 7 days.")
-        st.caption("Target: $50.00 / week")
+        st.caption(f"Target: {format_cents(AFFILIATE_WEEKLY_TARGET_CENTS)} / week")
     with col2:
         st.metric("Owned Received (7 days)", format_cents(own), help="Verified received profit, last 7 days.")
-        st.caption("Target: $50.00 / week")
+        st.caption(f"Target: {format_cents(OWNED_WEEKLY_TARGET_CENTS)} / week")
     with col3:
         st.metric("Combined Received (7 days)", format_cents(aff + own), help="Total verified received money, last 7 days.")
-        st.caption("Target: $100.00 / week")
+        st.caption(f"Target: {format_cents(COMBINED_MONTHLY_TARGET_CENTS)} / month")
 
     st.divider()
     st.subheader("System Status")

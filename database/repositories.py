@@ -5,9 +5,14 @@ from typing import List
 from sqlalchemy import text
 
 from database.connection import engine
-from models.product import Product, validate_status
 from models.campaign import Campaign, VALID_CAMPAIGN_STATUSES
 from models.finance import FinancialEvent
+from models.product import Product, validate_status
+
+_DISTRIBUTION_COLUMNS = {
+    "devto": "devto_pushed",
+    "bluesky": "bluesky_pushed",
+}
 
 
 class ProductRepository:
@@ -20,7 +25,8 @@ class ProductRepository:
             return str(result.scalar_one())
 
     def list_products(self, search: str = "", status: str = "all") -> List[Product]:
-        query = "SELECT id, url, name, revenue_model, status, merchant, image_url, opportunity_score, score_reasoning, created_at FROM products"
+        query = ("SELECT id, url, name, revenue_model, status, merchant, image_url, description, price, "
+                 "enrich_attempted, opportunity_score, score_reasoning, created_at FROM products")
         clauses, params = [], {}
         if search:
             clauses.append("(url ILIKE :search OR name ILIKE :search)")
@@ -32,12 +38,37 @@ class ProductRepository:
         query += " ORDER BY created_at DESC"
         with engine.connect() as connection:
             rows = connection.execute(text(query), params).mappings().all()
-        return [
-            Product(id=str(r["id"]), url=r["url"], name=r["name"], revenue_model=r["revenue_model"],
-                    status=r["status"], merchant=r["merchant"] or "Unknown", image_url=r["image_url"],
-                    opportunity_score=r["opportunity_score"], score_reasoning=r["score_reasoning"], created_at=r["created_at"])
-            for r in rows
-        ]
+        return [self._row_to_product(r) for r in rows]
+
+    def _row_to_product(self, r) -> Product:
+        return Product(
+            id=str(r["id"]), url=r["url"], name=r["name"], revenue_model=r["revenue_model"],
+            status=r["status"], merchant=r["merchant"] or "Unknown", image_url=r["image_url"],
+            description=r["description"], price=r["price"],
+            enrich_attempted=bool(r["enrich_attempted"]),
+            opportunity_score=r["opportunity_score"], score_reasoning=r["score_reasoning"],
+            created_at=r["created_at"],
+        )
+
+    def list_products_missing_enrichment(self) -> List[Product]:
+        with engine.connect() as connection:
+            rows = connection.execute(text(
+                "SELECT id, url, name, revenue_model, status, merchant, image_url, description, price, "
+                "enrich_attempted, opportunity_score, score_reasoning, created_at FROM products "
+                "WHERE description IS NULL AND enrich_attempted = FALSE ORDER BY created_at ASC")).mappings().all()
+        return [self._row_to_product(r) for r in rows]
+
+    def update_enrichment(self, product_id: str, description, price) -> bool:
+        with engine.begin() as connection:
+            result = connection.execute(text(
+                "UPDATE products SET description = :description, price = :price, enrich_attempted = TRUE WHERE id = :id"),
+                {"description": description, "price": price, "id": product_id})
+            return result.rowcount == 1
+
+    def mark_enrich_attempted(self, product_id: str) -> bool:
+        with engine.begin() as connection:
+            result = connection.execute(text("UPDATE products SET enrich_attempted = TRUE WHERE id = :id"), {"id": product_id})
+            return result.rowcount == 1
 
     def update_status(self, product_id: str, status: str) -> bool:
         validate_status(status)
@@ -96,17 +127,31 @@ class CampaignRepository:
                 "WHERE c.status = 'published' ORDER BY c.created_at DESC")).mappings().all()
         return [dict(r) for r in rows]
 
+    def list_published_unpushed(self, channel: str) -> List[dict]:
+        col = _DISTRIBUTION_COLUMNS[channel]
+        with engine.connect() as connection:
+            rows = connection.execute(text(
+                f"SELECT c.id, c.headline, c.body FROM campaigns c "
+                f"WHERE c.status = 'published' AND c.{col} = FALSE ORDER BY c.created_at ASC")).mappings().all()
+        return [dict(r) for r in rows]
+
+    def mark_pushed(self, channel: str, campaign_id: str) -> bool:
+        col = _DISTRIBUTION_COLUMNS[channel]
+        with engine.begin() as connection:
+            result = connection.execute(text(f"UPDATE campaigns SET {col} = TRUE WHERE id = :id"), {"id": campaign_id})
+            return result.rowcount == 1
+
     def get_traffic_stats(self) -> List[dict]:
         with engine.connect() as connection:
             rows = connection.execute(text(
-                "SELECT c.id, c.headline, c.status, c.product_id, c.agent_flag, c.created_at, "
-                "p.name AS product_name, p.merchant, "
+                "SELECT c.id, c.headline, c.status, c.product_id, c.agent_flag, c.created_at, c.revenue_cents, "
+                "p.name AS product_name, p.merchant, p.description, p.price, "
                 "COUNT(*) FILTER (WHERE e.event_type = 'view') AS views, "
                 "COUNT(*) FILTER (WHERE e.event_type = 'click') AS clicks "
                 "FROM campaigns c "
                 "JOIN products p ON p.id = c.product_id "
                 "LEFT JOIN page_events e ON e.campaign_id = c.id "
-                "GROUP BY c.id, c.headline, c.status, c.product_id, c.agent_flag, c.created_at, p.name, p.merchant "
+                "GROUP BY c.id, c.headline, c.status, c.product_id, c.agent_flag, c.created_at, c.revenue_cents, p.name, p.merchant, p.description, p.price "
                 "ORDER BY views DESC")).mappings().all()
         return [dict(r) for r in rows]
 
