@@ -17,6 +17,7 @@ from database.repositories import (
     AgentLogRepository,
     CampaignRepository,
     FinanceRepository,
+    LeadRepository,
     ProductRepository,
 )
 from models.campaign import Campaign
@@ -30,9 +31,11 @@ from services.optimizer import (
     decide_action,
 )
 from services.product_extractor import extract_product_data
+from services.reddit_scout import scout_from_products, scout_reddit
 from services.site_builder import build_site
 
 MAX_POSTS_PER_CHANNEL_PER_RUN = 2
+MAX_NEW_LEADS_PER_RUN = 10  # Reddit Scout insert cap (human replies, bot never posts)
 
 
 def run_daily_grind():
@@ -105,6 +108,24 @@ def run_daily_grind():
         if count:
             log_repo.log_action("DISTRIBUTE", f"Pushed {count} article(s) to {channel} (capped drip).")
 
+    # 3.5 Reddit Scout: surface live buyer questions for the OWNER to answer by hand.
+    # Read-only: no posting, no commenting, no login. Dedupe via UNIQUE url no-op.
+    new_leads = 0
+    try:
+        lead_repo = LeadRepository()
+        active = [p for p in prod_repo.list_products() if p.status == "active"]
+        terms = scout_from_products(active)
+        if terms:
+            for lead in scout_reddit(terms):
+                if new_leads >= MAX_NEW_LEADS_PER_RUN:
+                    break
+                if lead_repo.add_lead(lead["subreddit"], lead["title"], lead["url"]):
+                    new_leads += 1
+        log_repo.log_action("SCOUT", f"Reddit Scout surfaced {new_leads} new lead(s) "
+                                     f"for human reply (read-only; bot never posts).")
+    except Exception as exc:
+        log_repo.log_action("SCOUT", f"Reddit Scout skipped this run: {type(exc).__name__}.")
+
     # 4. Revenue-aware kill/scale on real traffic
     winners = revived = killed = 0
     now = datetime.now(timezone.utc)
@@ -161,7 +182,7 @@ def run_daily_grind():
 
     summary = (f"Daily grind complete. Enriched: {enriched}, Generated: {generated}, "
                f"Approved: {approved}, Published: {published}, "
-               f"Dev.to: {pushed['devto']}, Bluesky: {pushed['bluesky']}, "
+               f"Dev.to: {pushed['devto']}, Bluesky: {pushed['bluesky']}, New leads: {new_leads}, "
                f"Winners scaled: {winners}, Revived: {revived}, Killed: {killed}, Site pages: {pages}.")
     log_repo.log_action("COMPLETE", summary)
     return summary

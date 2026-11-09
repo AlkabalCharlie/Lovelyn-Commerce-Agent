@@ -14,6 +14,50 @@ _DISTRIBUTION_COLUMNS = {
     "bluesky": "bluesky_pushed",
 }
 
+VALID_LEAD_STATUSES = ("new", "contacted", "skipped")
+
+
+class LeadRepository:
+    """Reddit Scout leads: links for the HUMAN to answer by hand."""
+
+    def add_lead(self, subreddit: str, title: str, url: str,
+                 product_id: str = None) -> bool:
+        """Insert a lead. UNIQUE url + ON CONFLICT DO NOTHING makes repeats a no-op.
+        Returns True only when a NEW row was inserted."""
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("INSERT INTO leads (product_id, subreddit, title, url) "
+                     "VALUES (:product_id, :subreddit, :title, :url) "
+                     "ON CONFLICT (url) DO NOTHING RETURNING id"),
+                {"product_id": product_id, "subreddit": subreddit,
+                 "title": title, "url": url},
+            )
+            return result.first() is not None
+
+    def list_leads(self, status: str = "all", limit: int = 100) -> List[dict]:
+        query = ("SELECT l.id, l.subreddit, l.title, l.url, l.found_at, l.status, l.notes, "
+                 "l.product_id, p.name AS product_name FROM leads l "
+                 "LEFT JOIN products p ON p.id = l.product_id")
+        params = {"limit": limit}
+        if status != "all":
+            if status not in VALID_LEAD_STATUSES:
+                raise ValueError(f"Invalid lead status: {status}")
+            query += " WHERE l.status = :status"
+            params["status"] = status
+        query += " ORDER BY l.found_at DESC LIMIT :limit"
+        with engine.connect() as connection:
+            rows = connection.execute(text(query), params).mappings().all()
+        return [dict(r) for r in rows]
+
+    def update_status(self, lead_id: str, status: str) -> bool:
+        if status not in VALID_LEAD_STATUSES:
+            raise ValueError(f"Invalid lead status: {status}")
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("UPDATE leads SET status = :status WHERE id = :id"),
+                {"status": status, "id": lead_id})
+            return result.rowcount == 1
+
 
 class ProductRepository:
     def add(self, product: Product) -> str:
