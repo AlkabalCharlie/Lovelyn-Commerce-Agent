@@ -10,6 +10,7 @@ from config.settings import (
     BLUESKY_APP_PASSWORD,
     BLUESKY_HANDLE,
     DEVTO_API_KEY,
+    MEDIUM_API_KEY,
     SITE_BASE_URL,
 )
 from core.exceptions import ExtractionError, SSRFError
@@ -24,6 +25,7 @@ from models.campaign import Campaign
 from services.bluesky_publisher import publish_to_bluesky
 from services.campaign_generator import generate_campaign
 from services.devto_publisher import publish_to_devto
+from services.medium_publisher import publish_to_medium
 from services.optimizer import (
     MAX_WINNER_VARIANTS,
     WINNER_VARIANT_ANGLES,
@@ -35,6 +37,7 @@ from services.reddit_scout import scout_from_products, scout_reddit
 from services.site_builder import build_site
 
 MAX_POSTS_PER_CHANNEL_PER_RUN = 2
+MAX_MEDIUM_POSTS_PER_RUN = 1  # Medium flags automation faster than Bluesky
 MAX_NEW_LEADS_PER_RUN = 10  # Reddit Scout insert cap (human replies, bot never posts)
 
 
@@ -87,7 +90,7 @@ def run_daily_grind():
         log_repo.log_action("POLICY", "Autonomy gated: new campaigns wait as drafts for owner approval.")
 
     # 3. Distribution sweep, capped to a human drip per channel
-    pushed = {"devto": 0, "bluesky": 0}
+    pushed = {"devto": 0, "bluesky": 0, "medium": 0}
     if not DEVTO_API_KEY:
         log_repo.log_action("CONFIG", "DEVTO_API_KEY missing or parked - Dev.to distribution skipped.")
     else:
@@ -104,6 +107,14 @@ def run_daily_grind():
             if publish_to_bluesky(BLUESKY_HANDLE, BLUESKY_APP_PASSWORD, camp["headline"], url):
                 camp_repo.mark_pushed("bluesky", camp["id"])
                 pushed["bluesky"] += 1
+    if not MEDIUM_API_KEY:
+        log_repo.log_action("CONFIG", "MEDIUM_API_KEY missing or parked - Medium distribution skipped.")
+    else:
+        for camp in camp_repo.list_published_unpushed("medium")[:MAX_MEDIUM_POSTS_PER_RUN]:
+            url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
+            if publish_to_medium(camp["headline"], camp["body"], url):
+                camp_repo.mark_pushed("medium", camp["id"])
+                pushed["medium"] += 1
     for channel, count in pushed.items():
         if count:
             log_repo.log_action("DISTRIBUTE", f"Pushed {count} article(s) to {channel} (capped drip).")
@@ -182,7 +193,8 @@ def run_daily_grind():
 
     summary = (f"Daily grind complete. Enriched: {enriched}, Generated: {generated}, "
                f"Approved: {approved}, Published: {published}, "
-               f"Dev.to: {pushed['devto']}, Bluesky: {pushed['bluesky']}, New leads: {new_leads}, "
+               f"Dev.to: {pushed['devto']}, Bluesky: {pushed['bluesky']}, Medium: {pushed['medium']}, "
+               f"New leads: {new_leads}, "
                f"Winners scaled: {winners}, Revived: {revived}, Killed: {killed}, Site pages: {pages}.")
     log_repo.log_action("COMPLETE", summary)
     return summary

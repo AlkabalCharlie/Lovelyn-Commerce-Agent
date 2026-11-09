@@ -12,6 +12,7 @@ from models.product import Product, validate_status
 _DISTRIBUTION_COLUMNS = {
     "devto": "devto_pushed",
     "bluesky": "bluesky_pushed",
+    "medium": "medium_pushed",
 }
 
 VALID_LEAD_STATUSES = ("new", "contacted", "skipped")
