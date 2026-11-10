@@ -141,6 +141,14 @@ class CampaignRepository:
             )
             return str(result.scalar_one())
 
+    def has_campaign_of_type(self, product_id: str, campaign_type: str) -> bool:
+        """Idempotence guard: does this product already have a campaign of this type?"""
+        with engine.connect() as connection:
+            result = connection.execute(
+                text("SELECT 1 FROM campaigns WHERE product_id = :pid AND campaign_type = :ctype LIMIT 1"),
+                {"pid": product_id, "ctype": campaign_type})
+            return result.first() is not None
+
     def list_campaigns_for_product(self, product_id: str) -> List[Campaign]:
         with engine.connect() as connection:
             rows = connection.execute(text("SELECT id, product_id, campaign_type, headline, body, status, created_at FROM campaigns WHERE product_id = :pid ORDER BY created_at DESC"), {"pid": product_id}).mappings().all()

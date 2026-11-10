@@ -68,6 +68,8 @@ def run_daily_grind():
     for p in prod_repo.list_products():
         if not camp_repo.list_campaigns_for_product(p.id):
             data = generate_campaign(p.name, p.merchant, "Review", p.description, p.price)
+            if camp_repo.has_campaign_of_type(p.id, data["type"]):
+                continue  # idempotence: another run (local or cloud) got here first
             camp_repo.save_campaign(Campaign(product_id=p.id, campaign_type=data["type"],
                                              headline=data["headline"], body=data["body"]))
             generated += 1
@@ -160,14 +162,18 @@ def run_daily_grind():
             for angle in WINNER_VARIANT_ANGLES[:MAX_WINNER_VARIANTS]:
                 data = generate_campaign(row["product_name"], row["merchant"], angle,
                                          row["description"], row["price"])
+                if camp_repo.has_campaign_of_type(row["product_id"], data["type"]):
+                    continue  # idempotence: variant already exists
                 camp_repo.save_campaign(Campaign(product_id=row["product_id"], campaign_type=data["type"],
                                                  headline=data["headline"], body=data["body"]))
             log_repo.log_action("WINNER", f"'{row['headline']}' earned money/clicks -> {MAX_WINNER_VARIANTS} new angles auto-generated.")
         elif action == "revive":
             camp_repo.set_agent_flag(row["id"], "revived")
-            revived += 1
             data = generate_campaign(row["product_name"], row["merchant"], "Comparison",
                                      row["description"], row["price"])
+            if camp_repo.has_campaign_of_type(row["product_id"], data["type"]):
+                continue  # idempotence: comparison already exists
+            revived += 1
             camp_repo.save_campaign(Campaign(product_id=row["product_id"], campaign_type=data["type"],
                                              headline=data["headline"], body=data["body"]))
             log_repo.log_action("OPTIMIZE", f"'{row['headline']}': {row['views']} views, 0 clicks -> fresh Comparison angle generated.")
