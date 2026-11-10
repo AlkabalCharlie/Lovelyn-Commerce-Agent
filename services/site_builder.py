@@ -56,6 +56,52 @@ def _rest_url() -> str:
     return f"https://{ref}.supabase.co"
 
 
+def _md_to_html(text: str) -> str:
+    """Minimal markdown -> HTML. Input MUST already be HTML-escaped.
+
+    Supports exactly: '## ' headings, '### ' headings, '- ' bullet lists
+    (consecutive lines), and blank-line-separated paragraphs. Anything else
+    stays as plain text in a paragraph - nothing is invented.
+    """
+    lines = text.splitlines()
+    blocks = []          # finished html chunks
+    para = []            # pending plain-text lines
+    bullets = []         # pending list items
+
+    def flush_para():
+        if para:
+            blocks.append("<p>" + " ".join(para) + "</p>")
+            para.clear()
+
+    def flush_bullets():
+        if bullets:
+            blocks.append("<ul>" + "".join(f"<li>{b}</li>" for b in bullets) + "</ul>")
+            bullets.clear()
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            flush_para()
+            flush_bullets()
+        elif stripped.startswith("### "):
+            flush_para()
+            flush_bullets()
+            blocks.append(f"<h3>{stripped[4:]}</h3>")
+        elif stripped.startswith("## "):
+            flush_para()
+            flush_bullets()
+            blocks.append(f"<h2>{stripped[3:]}</h2>")
+        elif stripped.startswith("- "):
+            flush_para()
+            bullets.append(stripped[2:])
+        else:
+            flush_bullets()
+            para.append(stripped)
+    flush_para()
+    flush_bullets()
+    return "".join(blocks)
+
+
 def _utm(url: str, campaign_id: str) -> str:
     params = urlencode({"utm_source": "lovelyn", "utm_medium": "campaign", "utm_campaign": campaign_id[:8]})
     return f"{url}&{params}" if "?" in url else f"{url}?{params}"
@@ -65,7 +111,8 @@ def render_campaign_page(camp: dict, anon_key: str, rest_url: str, base_url: str
     """Render one public campaign page. All dynamic text is HTML-escaped."""
     headline = html.escape(camp["headline"])
     body_lines = [line for line in camp["body"].splitlines() if line.strip()]
-    body = "<br>".join(html.escape(line) for line in body_lines)
+    # Security unchanged: escape FIRST, convert minimal markdown SECOND.
+    body = _md_to_html(html.escape(camp["body"]))
     description = html.escape(body_lines[0][:150]) if body_lines else headline
     product = html.escape(camp["product_name"])
     merchant = html.escape(camp["merchant"] or "Independent / Other")
