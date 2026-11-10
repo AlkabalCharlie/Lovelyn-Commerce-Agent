@@ -11,7 +11,7 @@ def _facts_line(product_name: str, merchant: str, description, price) -> str:
         line += f" at {price}"
     line += "."
     if description:
-        line += f" In the seller's own words: {description}"
+        line += f" What it is: {description}"
     return line
 
 

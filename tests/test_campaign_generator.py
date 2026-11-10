@@ -24,3 +24,17 @@ def test_comparison_angle_mentions_merchant():
 def test_promo_angle_type():
     r = generate_campaign("Vest", "Etsy", "Promo")
     assert r["type"] == "Direct Promotion"
+
+
+def test_neutral_description_label():
+    """Label must be neutral: descriptions mix extracted seller text AND
+    owner-seeded notes, so 'What it is' is truthful for both."""
+    r = generate_campaign(
+        "Debt Guide", "Payhip", "Review",
+        description="A 40-page plan covering budgeting and snowball payoff.", price="$7",
+    )
+    assert "What it is: A 40-page plan" in r["body"]
+    assert "own words" not in r["body"]
+    # Label applies across every angle, not just Review.
+    for angle in ("Comparison", "Promo", "Story", "General"):
+        assert "What it is:" in generate_campaign("X", "Payhip", angle, description="d")["body"]
