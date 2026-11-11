@@ -49,19 +49,28 @@ def run_daily_grind():
 
     log_repo.log_action("START", f"Autonomous agent woke up (autonomy={AGENT_AUTONOMY}).")
 
-    # 1. Enrichment: read real descriptions/prices where merchants allow it
-    enriched = 0
+    # 1. Enrichment: tiered extraction (meta -> JSON-LD -> headless render).
+    # Seeded rows (description already set) are skipped entirely.
+    enriched = needs_facts_count = 0
     for p in prod_repo.list_products_missing_enrichment():
         try:
             data = extract_product_data(p.url)
             prod_repo.update_enrichment(p.id, data.get("description"), data.get("price"))
             enriched += 1
+            if not (data.get("description") or "").strip():
+                # Thin across all tiers: flag for the owner to seed manually.
+                prod_repo.mark_needs_facts(p.id, True)
+                needs_facts_count += 1
+            else:
+                prod_repo.mark_needs_facts(p.id, False)
         except (SSRFError, ExtractionError):
             prod_repo.mark_enrich_attempted(p.id)
         except Exception:
             prod_repo.mark_enrich_attempted(p.id)
     if enriched:
         log_repo.log_action("ENRICH", f"Enriched {enriched} product(s) with real descriptions/prices.")
+    if needs_facts_count:
+        log_repo.log_action("ENRICH", f"{needs_facts_count} product(s) flagged needs_facts - owner must seed facts manually.")
 
     # 2. Pipeline advance: every product gets a fact-based Review campaign
     generated = 0

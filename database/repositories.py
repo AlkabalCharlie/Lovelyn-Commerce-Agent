@@ -115,6 +115,15 @@ class ProductRepository:
             result = connection.execute(text("UPDATE products SET enrich_attempted = TRUE WHERE id = :id"), {"id": product_id})
             return result.rowcount == 1
 
+    def mark_needs_facts(self, product_id: str, needed: bool = True) -> bool:
+        """Flag a product whose extraction came back thin across all tiers.
+        Owner seeds facts manually; seeded rows skip enrichment entirely."""
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("UPDATE products SET needs_facts = :needed WHERE id = :id"),
+                {"needed": needed, "id": product_id})
+            return result.rowcount == 1
+
     def update_status(self, product_id: str, status: str) -> bool:
         validate_status(status)
         with engine.begin() as connection:

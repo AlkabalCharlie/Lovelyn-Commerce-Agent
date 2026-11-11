@@ -25,6 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Playwright chromium (tier 3 extraction)
+        run: python -m playwright install chromium
+
       - name: Run Autonomous Agent
         env:
           SUPABASE_USERNAME: ${{ secrets.SUPABASE_USERNAME }}
