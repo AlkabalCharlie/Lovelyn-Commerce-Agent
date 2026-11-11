@@ -36,6 +36,10 @@ BLUESKY_HANDLE = _get_setting("BLUESKY_HANDLE")
 BLUESKY_APP_PASSWORD = _get_setting("BLUESKY_APP_PASSWORD")
 MEDIUM_API_KEY = _get_setting("MEDIUM_API_KEY")
 
+# Optional LLM copy-polish. Unset = template copy exactly as before.
+OPENAI_API_KEY = _get_setting("OPENAI_API_KEY")
+COPY_AI_MODEL = _get_setting("COPY_AI_MODEL", "gpt-4o-mini")
+
 PAYHIP_WEBHOOK_TOKEN = _get_setting("PAYHIP_WEBHOOK_TOKEN")
 
 # Revenue targets (cents) - you set these based on your reality

@@ -2,7 +2,15 @@
 
 Only uses facts we actually have (merchant, price, seller description).
 Opinions are clearly labeled as opinions. Nothing is invented.
+
+Humanity layer: if OPENAI_API_KEY is set, the fact-locked template is
+optionally polished by services.copy_polisher for a human voice. The
+polisher REJECTS any output containing a number absent from the locked
+facts, so hallucinated prices can never reach the site. No key ->
+template copy, byte-identical to before.
 """
+
+from services import copy_polisher
 
 
 def _facts_line(product_name: str, merchant: str, description, price) -> str:
@@ -19,9 +27,11 @@ def generate_campaign(product_name: str, merchant: str, angle: str,
                       description=None, price=None) -> dict:
     facts = _facts_line(product_name, merchant, description, price)
     price_note = price or "not listed (check the live page)"
+    locked = {"name": product_name, "merchant": merchant,
+              "price": price, "description": description}
 
     if angle == "Review":
-        return {
+        result = {
             "type": "Review Article",
             "headline": f"{product_name} Review ({merchant}): What You Actually Get",
             "body": (
@@ -37,8 +47,11 @@ def generate_campaign(product_name: str, merchant: str, angle: str,
                 "is worth a direct look."
             ),
         }
+        result["headline"] = copy_polisher.polish_headline(result["headline"], locked)
+        result["body"] = copy_polisher.polish_body(result["body"], locked)
+        return result
     if angle == "Comparison":
-        return {
+        result = {
             "type": "Versus Comparison",
             "headline": f"{product_name} vs Alternatives on {merchant}: The Specifics",
             "body": (
@@ -51,8 +64,11 @@ def generate_campaign(product_name: str, merchant: str, angle: str,
                 "The listing that names concrete deliverables usually wins."
             ),
         }
+        result["headline"] = copy_polisher.polish_headline(result["headline"], locked)
+        result["body"] = copy_polisher.polish_body(result["body"], locked)
+        return result
     if angle == "Promo":
-        return {
+        result = {
             "type": "Direct Promotion",
             "headline": f"{product_name}: The Direct Route ({price_note})",
             "body": (
@@ -65,8 +81,11 @@ def generate_campaign(product_name: str, merchant: str, angle: str,
                 "to a fix rather than another research loop."
             ),
         }
+        result["headline"] = copy_polisher.polish_headline(result["headline"], locked)
+        result["body"] = copy_polisher.polish_body(result["body"], locked)
+        return result
     if angle == "Story":
-        return {
+        result = {
             "type": "Case Study / Story",
             "headline": f"How {product_name} Fits a Real Debt-or-Clutter Plan",
             "body": (
@@ -80,7 +99,10 @@ def generate_campaign(product_name: str, merchant: str, angle: str,
                 "the description above is where you verify them."
             ),
         }
-    return {
+        result["headline"] = copy_polisher.polish_headline(result["headline"], locked)
+        result["body"] = copy_polisher.polish_body(result["body"], locked)
+        return result
+    result = {
         "type": "General Awareness",
         "headline": f"Discover {product_name} on {merchant}",
         "body": (
@@ -89,3 +111,6 @@ def generate_campaign(product_name: str, merchant: str, angle: str,
             "Our take: read the seller's description first, then decide."
         ),
     }
+    result["headline"] = copy_polisher.polish_headline(result["headline"], locked)
+    result["body"] = copy_polisher.polish_body(result["body"], locked)
+    return result
