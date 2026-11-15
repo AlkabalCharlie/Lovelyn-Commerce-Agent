@@ -24,6 +24,19 @@ def validate_product_url(url: str) -> str:
     return cleaned
 
 
+def validate_affiliate_url(url: Optional[str]) -> Optional[str]:
+    """Affiliate/tracking link must be http(s) and not bare (a tag or query is expected)."""
+    if url is None or not str(url).strip():
+        return None
+    cleaned = str(url).strip()
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in ("http", "https"):
+        raise ProductValidationError("Affiliate URL must be http(s).")
+    if not parsed.netloc:
+        raise ProductValidationError("Affiliate URL must include a domain.")
+    return cleaned
+
+
 def validate_revenue_model(model: str) -> str:
     if model not in VALID_REVENUE_MODELS:
         raise ProductValidationError(
@@ -48,6 +61,7 @@ class Product:
     image_url: Optional[str] = None
     description: Optional[str] = None
     price: Optional[str] = None
+    affiliate_url: Optional[str] = None
     enrich_attempted: bool = False
     opportunity_score: Optional[int] = None
     score_reasoning: Optional[str] = None
@@ -57,5 +71,6 @@ class Product:
     def __post_init__(self) -> None:
         self.url = validate_product_url(self.url)
         self.name = (self.name or "").strip() or "Unnamed product"
+        self.affiliate_url = validate_affiliate_url(self.affiliate_url)
         self.revenue_model = validate_revenue_model(self.revenue_model)
         self.status = validate_status(self.status)

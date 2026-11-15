@@ -108,6 +108,21 @@ else:
             c_info.markdown(f"**{product.name}**")
             c_info.caption(product.url)
             c_info.caption(f"Model: {product.revenue_model} | Merchant: {product.merchant}")
+
+            # HUMAN STEP: paste the real tracked affiliate link so campaigns earn.
+            with c_info.expander("💰 Affiliate link (paste your tracked URL)"):
+                st.caption("Get this from the affiliate network (Amazon Associates, "
+                           "Impact, ShareASale, Payhip affiliates...). Until you paste "
+                           "it, campaign CTAs link to the raw merchant URL and earn $0.")
+                new_aff = st.text_input("Affiliate URL", value=product.affiliate_url or "",
+                                        key=f"aff_{product.id}")
+                if st.button("Save affiliate link", key=f"aff_btn_{product.id}"):
+                    try:
+                        repo.set_affiliate_url(product.id, new_aff.strip() or None)
+                        st.success("Saved - next site rebuild uses this link in CTAs.")
+                    except Exception as exc:
+                        st.error("Could not save. Check it is a valid http(s) URL.")
+                        print(f"Affiliate URL save failed: {exc}")
             
             if product.opportunity_score is not None:
                 if product.opportunity_score >= 70:

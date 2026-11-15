@@ -10,7 +10,18 @@ facts, so hallucinated prices can never reach the site. No key ->
 template copy, byte-identical to before.
 """
 
+from config.settings import SITE_NICHE_KEYWORD
 from services import copy_polisher
+
+
+def _keyword_angle(product_name: str, merchant: str) -> str:
+    """Long-tail search phrase a real buyer might type, not just the product name.
+    Falls back to a generic buyer-intent phrase when no niche keyword is set."""
+    if SITE_NICHE_KEYWORD:
+        return (f"Best {SITE_NICHE_KEYWORD} pick under $20: {product_name} "
+                f"({merchant}) - who it's actually for")
+    return (f"{product_name} on {merchant}: is it actually worth buying "
+            "(honest checklist)")
 
 
 def _facts_line(product_name: str, merchant: str, description, price) -> str:
@@ -33,7 +44,7 @@ def generate_campaign(product_name: str, merchant: str, angle: str,
     if angle == "Review":
         result = {
             "type": "Review Article",
-            "headline": f"{product_name} Review ({merchant}): What You Actually Get",
+            "headline": _keyword_angle(product_name, merchant),
             "body": (
                 f"{facts}\n\n"
                 "## What we checked\n"
@@ -53,7 +64,10 @@ def generate_campaign(product_name: str, merchant: str, angle: str,
     if angle == "Comparison":
         result = {
             "type": "Versus Comparison",
-            "headline": f"{product_name} vs Alternatives on {merchant}: The Specifics",
+            "headline": (f"{product_name} vs 3 alternatives on {merchant}: "
+                         "price, deliverables, who each one is for") if not SITE_NICHE_KEYWORD
+                        else (f"{SITE_NICHE_KEYWORD}: {product_name} vs what else "
+                              "buyers on {merchant} consider first").format(merchant=merchant),
             "body": (
                 f"{facts}\n\n"
                 "## How to compare it fairly\n"

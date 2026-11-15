@@ -8,6 +8,7 @@ on the transaction id. The OWNER pastes the endpoint URL into each network's
 own postback settings - we never hardcode guessed macro names.
 """
 import re
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 ALLOWED_SOURCES = ("payhip", "jvzoo", "clickbank", "cj", "shareasale",
@@ -15,8 +16,16 @@ ALLOWED_SOURCES = ("payhip", "jvzoo", "clickbank", "cj", "shareasale",
 
 AMOUNT_KEYS = ("amount", "amt", "total", "sale_amount", "commission", "value")
 TX_KEYS = ("transaction_id", "txn_id", "trans_id", "order_id", "txid", "receipt", "oid")
-PRODUCT_KEYS = ("product_id", "product", "item", "sku", "campaign_id")
+PRODUCT_KEYS = ("product_id", "product", "item", "sku")
 CURRENCY_KEYS = ("currency", "cur", "curr")
+# Attribution (Phase 2): campaign ids now survive into dedicated columns
+# instead of being flattened into the note. The OWNER appends
+# &campaign_id=<uuid> to each network's postback URL.
+CAMPAIGN_ID_KEYS = ("campaign_id", "cid", "utm_campaign")
+PRODUCT_ID_KEYS = ("product_id", "pid", "product_uuid")
+FEE_KEYS = ("fee", "fees", "network_fee", "gumroad_fee", "commission_fee")
+UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
 def pick_param(params: dict, keys) -> str | None:
@@ -44,6 +53,14 @@ def normalize_source(raw: str | None) -> str:
     return source if source in ALLOWED_SOURCES else "other"
 
 
+def _uuid_or_none(raw: str | None) -> str | None:
+    """Only a real UUID becomes an attribution id - free-text product names
+    must never be written into a uuid column."""
+    if raw and UUID_RE.fullmatch(raw):
+        return raw.lower()
+    return None
+
+
 def normalize_postback(params: dict) -> dict | None:
     """Full pipeline: params in -> normalized event dict out, or None if unusable."""
     amount_raw = pick_param(params, AMOUNT_KEYS)
@@ -56,6 +73,9 @@ def normalize_postback(params: dict) -> dict | None:
         return None  # dedupe REQUIRES a stable transaction id
     currency = (pick_param(params, CURRENCY_KEYS) or "USD").upper()[:3]
     product = pick_param(params, PRODUCT_KEYS) or ""
+    campaign_id = _uuid_or_none(pick_param(params, CAMPAIGN_ID_KEYS))
+    product_id = _uuid_or_none(pick_param(params, PRODUCT_ID_KEYS))
+    fees_cents = normalize_cents(pick_param(params, FEE_KEYS)) or 0
     return {
         "stream": "affiliate",
         "amount_cents": cents,
@@ -63,5 +83,9 @@ def normalize_postback(params: dict) -> dict | None:
         "source": source,
         "source_type": source,
         "tx_id": tx,
+        "campaign_id": campaign_id,
+        "product_id": product_id,
+        "fees_cents": fees_cents,
+        "status": "verified",
         "note": f"affiliate postback {source}{(' product=' + product) if product else ''}"[:200],
     }

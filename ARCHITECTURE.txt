@@ -1,0 +1,194 @@
+# Lovelyn — Architecture Overview
+# (generated from the source code; see HUMAN_TASKS.md for your manual steps)
+
+================================================================================
+1. WHAT IT IS
+================================================================================
+A cloud-based personal commerce intelligence platform. It identifies product
+opportunities, generates fact-locked marketing campaigns, publishes them to a
+public GitHub Pages storefront, drip-distributes them to borrowed channels
+(Dev.to, Bluesky, Medium), tracks real traffic and real money separately, and
+autonomously kills / revives / scales campaigns based on revenue.
+
+Two revenue streams, never mixed:
+  - affiliate commissions (tracked links -> postbacks)
+  - owned-product profit (Payhip/Gumroad checkout -> webhook)
+
+Financial integrity rules enforced in code:
+  - only RECEIVED money is logged, always with a proof note
+  - all money math in integer cents
+  - estimates are never reported as earned money
+
+================================================================================
+2. STACK & DEPLOYMENT
+================================================================================
+Language      : Python 3.10+  (Streamlit dashboard, plain services)
+Database      : Supabase PostgreSQL, free tier, Row-Level Security on all tables
+Dashboard     : Streamlit Community Cloud (free tier), app.py entry point,
+                password-gated (APP_PASSWORD)
+Public site   : GitHub Pages served from docs/, rebuilt daily by the agent
+                (index.html, sitemap.xml, robots.txt, campaign-<uuid>.html)
+Scheduler     : GitHub Actions cron (.github/workflows/daily_grind.yml),
+                runs the autonomous agent daily at 08:00 UTC
+Edge function : Supabase supabase/functions/affiliate-postback (receives
+                affiliate network postbacks and logs financial events)
+Config        : .env locally; Streamlit Secrets and GitHub repo Secrets in
+                the cloud (same variable names) - config/settings.py reads
+                env first, then Streamlit secrets
+
+================================================================================
+3. DIRECTORY MAP
+================================================================================
+app.py                  Streamlit dashboard shell + password gate + navigation
+pages/                  Dashboard tabs:
+                          products.py   - intake, scoring, affiliate-link input
+                          campaigns.py  - draft review / approve
+                          traffic.py    - views/clicks per campaign
+                          finance.py    - received money per stream + targets
+                          leads.py      - Reddit leads + draft replies
+                          agent_logs.py - every autonomous action, timestamped
+core/                   Shared exceptions (ExtractionError, SSRFError, ...)
+config/settings.py      All settings; env -> Streamlit secrets fallback
+models/                 Dataclasses + validation:
+                          product.py   (Product, revenue_model, affiliate_url)
+                          campaign.py  (Campaign, status lifecycle)
+                          finance.py   (FinancialEvent, integer cents)
+database/
+  connection.py         SQLAlchemy engine -> Supabase pooler
+  repositories.py       ALL SQL lives here:
+                          ProductRepository  - products, enrichment, scores,
+                                               affiliate_url, observations
+                          CampaignRepository - campaign lifecycle, publish,
+                                               per-channel push flags,
+                                               traffic stats join w/ page_events
+                          LeadRepository     - Reddit scout leads (human acts)
+                          FinanceRepository  - financial_events
+                          AgentLogRepository - agent_logs (audit trail)
+  migrations/           SQL to run once in the Supabase SQL editor, e.g.
+                          add_monetization.sql   (affiliate_url column)
+                          affiliate_postback.sql (source_type, tx_id idempotence)
+services/               The brain, one concern per file (see section 4)
+supabase/functions/     affiliate-postback Edge Function (server-side webhook)
+tests/                  pytest suite (95 tests) - unit, no live network
+docs/                   GitHub Pages output (generated; do not hand-edit)
+
+================================================================================
+4. SERVICES - THE PIPELINE
+================================================================================
+merchant_identifier.py   Hostname -> merchant name (Etsy, Payhip, Shopify...)
+product_extractor.py     Tiered enrichment: meta tags -> JSON-LD -> headless
+                         render. SSRF-guarded; refusals fall back to manual
+                         seeding (needs_facts flag).
+opportunity_scorer.py    Explainable 0-100 score: marketplace traffic (40) +
+                         revenue model (30) + data confidence (30), with
+                         per-point reasoning text saved to the product.
+campaign_generator.py    Fact-locked copy from REAL data only (merchant,
+                         price, description). Nothing invented. Angles:
+                         Review, Comparison, Promo, Story, General Awareness.
+                         Optional human polish: if OPENAI_API_KEY is set,
+                         copy_polisher rewrites for voice but REJECTS any
+                         output containing a number not in the locked facts,
+                         so hallucinated prices can never reach the site.
+                         Headlines use SITE_NICHE_KEYWORD for long-tail
+                         buyer-intent phrasing when set.
+content_formatter.py     Export formats (Blog Post / Social Thread /
+                         Newsletter). Content-first: opens with a useful,
+                         non-promotional niche tip; product comes second.
+site_builder.py          Renders published campaigns to docs/ as static HTML.
+                         SEO-ready (meta description, canonical, sitemap,
+                         robots). CTA links to the product's affiliate_url
+                         when set, else the raw merchant URL; adds UTMs.
+                         Optional OWNED_PRODUCT_URL renders a second Buy
+                         button. FTC affiliate disclosure on every page.
+                         Inline beacon JS posts view/click events straight to
+                         Supabase (page_events) from the visitor's browser.
+bluesky_publisher.py     Bluesky posts via app password (2 per run cap)
+devto_publisher.py       Dev.to articles via API (2 per run cap)
+medium_publisher.py      Medium posts via integration token (1 per run cap)
+                         (hashnode_publisher.py exists as an extra channel)
+reddit_scout.py          READ-ONLY Reddit public JSON search for live buyer
+                         questions. No login, no posting, hard call cap, polite
+                         delays, backoff on 429/403. draft_reply() pre-writes
+                         an affiliation-disclosing reply the HUMAN posts by hand.
+affiliate_postback.py    Normalizes affiliate network postbacks (amount keys,
+                         tx-id keys) into financial_events rows; deduped by
+                         unique tx_id. Python mirror of the Edge Function.
+optimizer.py             Revenue-aware kill/scale rules:
+                           winner : revenue >= $1 OR >= 1 click  -> generate
+                                    Comparison + Promo variant angles
+                           revive : >=3 views, 0 clicks, >=3 days -> fresh
+                                    Comparison angle
+                           kill   : >=10 views, 0 clicks, >=7 days -> archive
+                           rewrite: 0 views after 5 days -> regenerate with a
+                                    keyword-angled headline (REWRITE action)
+                         Thresholds are ramped down for month-one traffic.
+
+================================================================================
+5. THE AUTONOMOUS AGENT (services/autonomous_agent.py)
+================================================================================
+run_daily_grind() executes once per day (GitHub Actions 08:00 UTC):
+
+  1. ENRICH     Tiered extraction for un-enriched products; thin results
+                flagged needs_facts for manual seeding.
+  2. GENERATE   Every product without a campaign gets a fact-based Review
+                campaign. Idempotent (has_campaign_of_type guard) so local
+                and cloud runs never double-generate.
+  3. APPROVE/PUBLISH  AGENT_AUTONOMY=full: auto-approves drafts and publishes.
+                Other values: drafts wait for owner approval in the dashboard.
+  4. DISTRIBUTE Capped human-drip sweep per channel: devto/bluesky/medium,
+                each skipped with a CONFIG log when credentials are missing.
+  5. SCOUT      Reddit leads for the human to answer (insert cap 10/run).
+  6. OPTIMIZE   Revenue-aware winner/revive/kill/rewrite decisions on real
+                traffic from page_events + financial_events.
+  7. MILESTONES Celebrates revenue thresholds once per stream per window.
+  8. SITE       Rebuilds the GitHub Pages storefront.
+  9. COMPLETE   One-line summary of everything the run did, into agent_logs.
+
+================================================================================
+6. DATA FLOW (money path)
+================================================================================
+  You paste affiliate_url          You sell owned product
+        |                                  |
+        v                                  v
+  Visitor reads campaign page on GitHub Pages
+        |
+        v  (beacon)                click CTA  ->  affiliate tag  ->  sale
+  page_events (view/click)                        |
+        |                                         v
+        |                          affiliate-postback Edge Function
+        |                                         |
+        +---------- agent decisions ------------> v
+                                      financial_events  (integer cents,
+                                      stream = affiliate | owned)
+                                                   |
+                                                   v
+                          Dashboard -> Finance   +   milestone celebrations
+
+Agent decisions (optimizer) feed back into step 2 of the next run: winners
+spawn variant campaigns, dead pages get rewritten or archived. The loop
+compounds ONLY after the human parts in HUMAN_TASKS.md are done (affiliate
+links pasted, owned product listed).
+
+================================================================================
+7. SAFETY / COMPLIANCE DESIGN
+================================================================================
+- SSRF guards on all outbound URL fetching
+- HTML-escape FIRST, minimal markdown conversion SECOND on public pages
+- rel="nofollow sponsored noopener" on all outbound CTAs
+- FTC affiliate disclosure rendered on every monetized page
+- Fact-locking in the copy polisher blocks hallucinated prices/claims
+- Reddit: read-only, never posts, descriptive User-Agent, rate-limited
+- RLS enabled on every Supabase table; single-owner password gate on dashboard
+- Idempotence everywhere: unique lead URLs, unique tx_ids, per-type campaign
+  guards - safe against overlapping local + cloud runs
+
+================================================================================
+8. HOW TO RUN
+================================================================================
+  pip install -r requirements.txt
+  copy .env.example -> .env and fill values (see HUMAN_TASKS.md for the
+  revenue-critical ones: OWNED_PRODUCT_URL, SITE_NICHE_KEYWORD + run the
+  add_monetization.sql migration in Supabase)
+  python -m pytest tests -q          # 95 tests
+  python -m streamlit run app.py     # dashboard
+  python run_agent.py                # one manual agent run

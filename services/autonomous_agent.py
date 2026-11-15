@@ -4,6 +4,7 @@ Pacing rule: at most MAX_POSTS_PER_CHANNEL_PER_RUN posts per borrowed
 channel per day, so distribution looks like a human drip, not a firehose.
 """
 from datetime import datetime, timedelta, timezone
+import os
 
 from config.settings import (
     AGENT_AUTONOMY,
@@ -11,6 +12,7 @@ from config.settings import (
     BLUESKY_HANDLE,
     DEVTO_API_KEY,
     MEDIUM_API_KEY,
+    OWNED_PRODUCT_URL,
     SITE_BASE_URL,
 )
 from core.exceptions import ExtractionError, SSRFError
@@ -18,6 +20,7 @@ from database.repositories import (
     AgentLogRepository,
     CampaignRepository,
     FinanceRepository,
+    IntegrationHealthRepository,
     LeadRepository,
     ProductRepository,
 )
@@ -31,6 +34,7 @@ from services.optimizer import (
     WINNER_VARIANT_ANGLES,
     check_milestones,
     decide_action,
+    decide_rewrite,
 )
 from services.product_extractor import extract_product_data
 from services.reddit_scout import scout_from_products, scout_reddit
@@ -48,6 +52,26 @@ def run_daily_grind():
     fin_repo = FinanceRepository()
 
     log_repo.log_action("START", f"Autonomous agent woke up (autonomy={AGENT_AUTONOMY}).")
+
+    # 0. Integration health snapshot: every external dependency gets a persisted
+    #    status row (connected / configuration_missing / failed). No silent gaps.
+    health_repo = IntegrationHealthRepository()
+    _HEALTH_KEYS = (
+        ("devto", bool(DEVTO_API_KEY), "DEVTO_API_KEY"),
+        ("bluesky", bool(BLUESKY_HANDLE and BLUESKY_APP_PASSWORD), "BLUESKY_HANDLE/BLUESKY_APP_PASSWORD"),
+        ("medium", bool(MEDIUM_API_KEY), "MEDIUM_API_KEY"),
+        ("gumroad_ping", bool(os.getenv("GUMROAD_PING_TOKEN")), "GUMROAD_PING_TOKEN"),
+        ("payhip_webhook", bool(os.getenv("PAYHIP_WEBHOOK_TOKEN")), "PAYHIP_WEBHOOK_TOKEN"),
+        ("owned_product", bool(OWNED_PRODUCT_URL), "OWNED_PRODUCT_URL"),
+    )
+    for integration, configured, key_name in _HEALTH_KEYS:
+        try:
+            health_repo.set_status(
+                integration,
+                "connected" if configured else "configuration_missing",
+                f"{key_name} {'set' if configured else 'not set'}")
+        except Exception as exc:
+            log_repo.log_action("HEALTH", f"{integration} health write failed: {type(exc).__name__}.")
 
     # 1. Enrichment: tiered extraction (meta -> JSON-LD -> headless render).
     # Seeded rows (description already set) are skipped entirely.
@@ -149,7 +173,7 @@ def run_daily_grind():
         log_repo.log_action("SCOUT", f"Reddit Scout skipped this run: {type(exc).__name__}.")
 
     # 4. Revenue-aware kill/scale on real traffic
-    winners = revived = killed = 0
+    winners = revived = killed = rewritten = 0
     now = datetime.now(timezone.utc)
     for row in camp_repo.get_traffic_stats():
         created = row["created_at"]
@@ -186,6 +210,22 @@ def run_daily_grind():
             camp_repo.save_campaign(Campaign(product_id=row["product_id"], campaign_type=data["type"],
                                              headline=data["headline"], body=data["body"]))
             log_repo.log_action("OPTIMIZE", f"'{row['headline']}': {row['views']} views, 0 clicks -> fresh Comparison angle generated.")
+        elif decide_rewrite(row["views"], row["clicks"], age_days, row["agent_flag"]):
+            # Zero views after N days: the headline/meta never caught anyone.
+            # Regenerate with the long-tail keyword angle instead of archiving.
+            camp_repo.set_agent_flag(row["id"], "rewritten")
+            data = generate_campaign(row["product_name"], row["merchant"], "Review",
+                                     row["description"], row["price"])
+            if camp_repo.has_campaign_of_type(row["product_id"], data["type"]):
+                data = generate_campaign(row["product_name"], row["merchant"], "Promo",
+                                         row["description"], row["price"])
+            if not camp_repo.has_campaign_of_type(row["product_id"], data["type"]):
+                camp_repo.save_campaign(Campaign(product_id=row["product_id"], campaign_type=data["type"],
+                                                 headline=data["headline"], body=data["body"]))
+            rewritten += 1
+            log_repo.log_action(
+                "REWRITE",
+                f"'{row['headline']}' got zero views in {age_days} days -> keyword-angled replacement generated.")
         elif action == "kill":
             camp_repo.set_agent_flag(row["id"], "killed")
             camp_repo.update_campaign_status(row["id"], "archived")
@@ -210,6 +250,7 @@ def run_daily_grind():
                f"Approved: {approved}, Published: {published}, "
                f"Dev.to: {pushed['devto']}, Bluesky: {pushed['bluesky']}, Medium: {pushed['medium']}, "
                f"New leads: {new_leads}, "
-               f"Winners scaled: {winners}, Revived: {revived}, Killed: {killed}, Site pages: {pages}.")
+               f"Winners scaled: {winners}, Revived: {revived}, Killed: {killed}, "
+               f"Rewritten: {rewritten}, Site pages: {pages}.")
     log_repo.log_action("COMPLETE", summary)
     return summary

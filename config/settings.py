@@ -42,6 +42,13 @@ COPY_AI_MODEL = _get_setting("COPY_AI_MODEL", "gpt-4o-mini")
 
 PAYHIP_WEBHOOK_TOKEN = _get_setting("PAYHIP_WEBHOOK_TOKEN")
 
+# Owned-product checkout URL (Payhip/Gumroad etc.). Unset = no Buy button.
+OWNED_PRODUCT_URL = _get_setting("OWNED_PRODUCT_URL")
+
+# Niche keyword for long-tail search headlines (e.g. "budget planner",
+# "day trading journal", "declutter checklist"). Unset = generic buyer-intent.
+SITE_NICHE_KEYWORD = _get_setting("SITE_NICHE_KEYWORD")
+
 # Revenue targets (cents) - you set these based on your reality
 AFFILIATE_WEEKLY_TARGET_CENTS = int(_get_setting("AFFILIATE_WEEKLY_TARGET_CENTS", "50000"))  # $500
 OWNED_WEEKLY_TARGET_CENTS = int(_get_setting("OWNED_WEEKLY_TARGET_CENTS", "50000"))  # $500

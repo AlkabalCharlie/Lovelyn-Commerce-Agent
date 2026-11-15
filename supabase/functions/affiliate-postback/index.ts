@@ -22,8 +22,19 @@ const AMOUNT_KEYS = ["amount", "amt", "total", "sale_amount", "commission", "val
 // Same for the transaction/order identifier.
 const TX_KEYS = ["transaction_id", "txn_id", "trans_id", "order_id", "txid", "receipt", "oid"];
 // Product/reference identifiers (best-effort, for the note only).
-const PRODUCT_KEYS = ["product_id", "product", "item", "sku", "campaign_id"];
+const PRODUCT_KEYS = ["product_id", "product", "item", "sku"];
 const CURRENCY_KEYS = ["currency", "cur", "curr"];
+// Phase 2 attribution: the OWNER appends &campaign_id=<campaign uuid> (and
+// optionally &product_id=<product uuid>) to the network's postback URL. Only
+// genuine UUIDs survive into the dedicated financial_events columns; free-text
+// product names and made-up ids are dropped, never guessed.
+const CAMPAIGN_ID_KEYS = ["campaign_id", "cid", "utm_campaign"];
+const PRODUCT_ID_KEYS = ["product_id", "pid", "product_uuid"];
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function uuid_or_none(raw: string | null): string | null {
+  return raw && UUID_RE.test(raw) ? raw.toLowerCase() : null;
+}
 
 function pick(params: Record<string, string>, keys: string[]): string | null {
   for (const k of keys) {
@@ -111,6 +122,8 @@ Deno.serve(async (req: Request) => {
 
   const currency = (pick(params, CURRENCY_KEYS) || "USD").toUpperCase().slice(0, 3);
   const product = pick(params, PRODUCT_KEYS) || "";
+  const campaign_id = uuid_or_none(pick(params, CAMPAIGN_ID_KEYS));
+  const product_id = uuid_or_none(pick(params, PRODUCT_ID_KEYS));
   const note = `affiliate postback ${source}${product ? ` product=${product}` : ""}`.slice(0, 200);
 
   const supabase = createClient(
@@ -127,6 +140,8 @@ Deno.serve(async (req: Request) => {
     p_external_id: tx,
     p_source_type: source,
     p_tx_id: tx,
+    p_campaign_id: campaign_id,
+    p_product_id: product_id,
   });
 
   if (error) {

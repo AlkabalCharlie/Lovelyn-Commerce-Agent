@@ -7,10 +7,19 @@ Clicks are still signals, but revenue is the truth.
 WINNER_VARIANT_ANGLES = ("Comparison", "Promo")
 MAX_WINNER_VARIANTS = 2
 
-# Thresholds
-MIN_VIEWS_TO_JUDGE = 5
-MIN_AGE_DAYS = 3
+# Thresholds (ramped down so tiny-but-real month-one traffic still decides)
+MIN_VIEWS_TO_JUDGE = 3
+MIN_AGE_DAYS = 2
 REVENUE_THRESHOLD_CENTS = 100  # $1 minimum to count as "earning"
+NO_TRAFFIC_REWRITE_DAYS = 5    # page got zero views this long -> rewrite headline
+REWRITE_FLAG = "rewritten"
+
+
+def decide_rewrite(views: int, clicks: int, age_days: int, flag) -> bool:
+    """No traffic at all after N days -> headline/meta is dead, rewrite it.
+    Distinct from 'revive', which needs some views to measure."""
+    return (views == 0 and age_days >= NO_TRAFFIC_REWRITE_DAYS
+            and flag not in (REWRITE_FLAG, "killed"))
 
 
 def decide_action(views: int, clicks: int, age_days: int, flag, revenue_cents: int = 0) -> str:

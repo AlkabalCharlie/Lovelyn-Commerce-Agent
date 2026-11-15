@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from database.repositories import VALID_LEAD_STATUSES, LeadRepository
+from services.reddit_scout import draft_reply
 
 st.title("Leads")
 st.caption("Live Reddit questions the scout found. YOU reply by hand in your browser - "
@@ -40,6 +41,11 @@ for row in leads:
         st.caption(f"r/{row['subreddit']} | {age_hours:.0f}h old | Status: {row['status']}"
                    + (f" | Product: {row['product_name']}" if row["product_name"] else ""))
         st.markdown(f"[Open on Reddit]({row['url']})")
+        draft = draft_reply(row["title"], row.get("product_name"))
+        with st.expander("📝 Draft reply (copy, edit, post yourself - bot never posts)"):
+            st.write(draft)
+            st.caption("Discloses affiliation and invents nothing. Edit to match the "
+                       "real thread before posting, or the mods will smell it.")
         if row["notes"]:
             st.write(row["notes"])
         b1, b2 = st.columns(2)

@@ -16,6 +16,32 @@ _DISTRIBUTION_COLUMNS = {
 }
 
 VALID_LEAD_STATUSES = ("new", "contacted", "skipped")
+VALID_HEALTH_STATUSES = ("connected", "authorization_expired", "configuration_missing",
+                         "quota_exceeded", "failed", "awaiting_verification")
+
+
+class IntegrationHealthRepository:
+    """P0-3: persisted per-integration state so a silently broken webhook or
+    expired token is VISIBLE. One row per named integration, upserted."""
+
+    def set_status(self, integration: str, status: str, detail: str = None) -> bool:
+        if status not in VALID_HEALTH_STATUSES:
+            raise ValueError(f"Invalid health status: {status}")
+        with engine.begin() as connection:
+            result = connection.execute(text(
+                "INSERT INTO integration_health (integration, status, detail, checked_at) "
+                "VALUES (:i, :s, :d, now()) "
+                "ON CONFLICT (integration) DO UPDATE SET status = :s, detail = :d, "
+                "checked_at = now()"),
+                {"i": integration, "s": status, "d": detail})
+            return result.rowcount >= 1
+
+    def list_status(self) -> list:
+        with engine.connect() as connection:
+            rows = connection.execute(text(
+                "SELECT integration, status, detail, checked_at FROM integration_health "
+                "ORDER BY integration")).mappings().all()
+        return [dict(r) for r in rows]
 
 
 class LeadRepository:
@@ -64,14 +90,22 @@ class ProductRepository:
     def add(self, product: Product) -> str:
         with engine.begin() as connection:
             result = connection.execute(
-                text("INSERT INTO products (url, name, revenue_model, status, merchant, image_url) VALUES (:url, :name, :revenue_model, :status, :merchant, :image_url) RETURNING id"),
-                {"url": product.url, "name": product.name, "revenue_model": product.revenue_model, "status": product.status, "merchant": product.merchant, "image_url": product.image_url},
+                text("INSERT INTO products (url, name, revenue_model, status, merchant, image_url, affiliate_url) VALUES (:url, :name, :revenue_model, :status, :merchant, :image_url, :affiliate_url) RETURNING id"),
+                {"url": product.url, "name": product.name, "revenue_model": product.revenue_model, "status": product.status, "merchant": product.merchant, "image_url": product.image_url, "affiliate_url": product.affiliate_url},
             )
             return str(result.scalar_one())
 
+    def set_affiliate_url(self, product_id: str, affiliate_url) -> bool:
+        """Owner pastes the real tracked affiliate link here (HUMAN step)."""
+        with engine.begin() as connection:
+            result = connection.execute(
+                text("UPDATE products SET affiliate_url = :a WHERE id = :id"),
+                {"a": affiliate_url, "id": product_id})
+            return result.rowcount == 1
+
     def list_products(self, search: str = "", status: str = "all") -> List[Product]:
         query = ("SELECT id, url, name, revenue_model, status, merchant, image_url, description, price, "
-                 "enrich_attempted, opportunity_score, score_reasoning, created_at FROM products")
+                 "affiliate_url, enrich_attempted, opportunity_score, score_reasoning, created_at FROM products")
         clauses, params = [], {}
         if search:
             clauses.append("(url ILIKE :search OR name ILIKE :search)")
@@ -89,7 +123,7 @@ class ProductRepository:
         return Product(
             id=str(r["id"]), url=r["url"], name=r["name"], revenue_model=r["revenue_model"],
             status=r["status"], merchant=r["merchant"] or "Unknown", image_url=r["image_url"],
-            description=r["description"], price=r["price"],
+            description=r["description"], price=r["price"], affiliate_url=r.get("affiliate_url"),
             enrich_attempted=bool(r["enrich_attempted"]),
             opportunity_score=r["opportunity_score"], score_reasoning=r["score_reasoning"],
             created_at=r["created_at"],
@@ -99,7 +133,7 @@ class ProductRepository:
         with engine.connect() as connection:
             rows = connection.execute(text(
                 "SELECT id, url, name, revenue_model, status, merchant, image_url, description, price, "
-                "enrich_attempted, opportunity_score, score_reasoning, created_at FROM products "
+                "affiliate_url, enrich_attempted, opportunity_score, score_reasoning, created_at FROM products "
                 "WHERE description IS NULL AND enrich_attempted = FALSE ORDER BY created_at ASC")).mappings().all()
         return [self._row_to_product(r) for r in rows]
 
@@ -184,7 +218,7 @@ class CampaignRepository:
         with engine.connect() as connection:
             rows = connection.execute(text(
                 "SELECT c.id, c.headline, c.body, c.campaign_type, p.name AS product_name, "
-                "p.url AS product_url, p.merchant FROM campaigns c "
+                "p.url AS product_url, p.merchant, p.affiliate_url FROM campaigns c "
                 "JOIN products p ON p.id = c.product_id "
                 "WHERE c.status = 'published' ORDER BY c.created_at DESC")).mappings().all()
         return [dict(r) for r in rows]
@@ -224,24 +258,94 @@ class CampaignRepository:
 
 
 class FinanceRepository:
-    def add_event(self, event: FinancialEvent) -> str:
+    def add_event(self, event: FinancialEvent, campaign_id=None, product_id=None,
+                  fees_cents=None, status="verified") -> str:
         with engine.begin() as connection:
             result = connection.execute(
-                text("INSERT INTO financial_events (stream, amount_cents, source, note, received_at) "
-                     "VALUES (:stream, :amount_cents, :source, :note, :received_at) RETURNING id"),
+                text("INSERT INTO financial_events (stream, amount_cents, source, note, received_at, "
+                     "campaign_id, product_id, fees_cents, status) "
+                     "VALUES (:stream, :amount_cents, :source, :note, :received_at, "
+                     ":campaign_id, :product_id, :fees_cents, :status) RETURNING id"),
                 {"stream": event.stream, "amount_cents": event.amount_cents, "source": event.source,
-                 "note": event.note, "received_at": event.received_at},
+                 "note": event.note, "received_at": event.received_at,
+                 "campaign_id": campaign_id, "product_id": product_id,
+                 "fees_cents": fees_cents, "status": status},
             )
             return str(result.scalar_one())
 
     def sum_by_stream_since(self, since: date) -> dict:
+        """Verified money only. Pending is never revenue; reversed never adds."""
         with engine.connect() as connection:
             rows = connection.execute(
                 text("SELECT stream, COALESCE(SUM(amount_cents), 0) AS total_cents "
-                     "FROM financial_events WHERE received_at >= :since GROUP BY stream"),
+                     "FROM financial_events WHERE received_at >= :since "
+                     "AND status = 'verified' GROUP BY stream"),
                 {"since": since},
             ).mappings().all()
         return {row["stream"]: int(row["total_cents"]) for row in rows}
+
+    # ---- Phase 2: net profit -------------------------------------------------
+    # net = verified revenue - refunds - fees - attributable product costs,
+    # computed entirely in SQL on integer cents. Refund rows carry
+    # refunded_cents (the reversed amount); their amount_cents is informational
+    # (the original sale value) and must NOT count as revenue.
+
+    def net_profit_summary(self, since: date = None) -> dict:
+        params = {}
+        where = ""
+        if since is not None:
+            where = "WHERE received_at >= :since"
+            params["since"] = since
+        with engine.connect() as connection:
+            rows = connection.execute(text(f"""
+                SELECT stream,
+                    COALESCE(SUM(CASE WHEN status = 'verified' THEN amount_cents END), 0) AS gross_cents,
+                    COALESCE(SUM(refunded_cents), 0)                                  AS refunds_cents,
+                    COALESCE(SUM(CASE WHEN status = 'verified' THEN fees_cents END), 0)
+                      + COALESCE(SUM(CASE WHEN status = 'verified' THEN cost_cents END), 0) AS costs_cents
+                FROM financial_events {where}
+                GROUP BY stream"""), params).mappings().all()
+        out = {}
+        for row in rows:
+            gross = int(row["gross_cents"])
+            refunds = int(row["refunds_cents"])
+            costs = int(row["costs_cents"])
+            out[row["stream"]] = {
+                "gross_cents": gross, "refunds_cents": refunds,
+                "costs_cents": costs, "net_cents": gross - refunds - costs,
+            }
+        return out
+
+    def breakdown(self, dimension: str, since: date = None, limit: int = 15):
+        """Revenue by 'product', 'campaign', or 'channel' (source).
+        Only verified rows; refunds subtracted via refunded_cents."""
+        if dimension == "product":
+            group = "COALESCE(p.name, '(unattributed)')"
+            joins = "LEFT JOIN products p ON p.id = f.product_id"
+        elif dimension == "campaign":
+            group = "COALESCE(c.headline, '(unattributed)')"
+            joins = "LEFT JOIN campaigns c ON c.id = f.campaign_id"
+        elif dimension == "channel":
+            group, joins = "COALESCE(f.source, '(none)')", ""
+        else:
+            raise ValueError("dimension must be product, campaign, or channel")
+        params = {"limit": limit}
+        where = ""
+        if since is not None:
+            where = "WHERE f.received_at >= :since"
+            params["since"] = since
+        with engine.connect() as connection:
+            rows = connection.execute(text(f"""
+                SELECT {group} AS label,
+                    COALESCE(SUM(CASE WHEN f.status = 'verified' THEN f.amount_cents END), 0)
+                      - COALESCE(SUM(f.refunded_cents), 0)
+                      - COALESCE(SUM(CASE WHEN f.status = 'verified' THEN f.fees_cents END), 0)
+                      - COALESCE(SUM(CASE WHEN f.status = 'verified' THEN f.cost_cents END), 0)
+                      AS net_cents,
+                    COUNT(*) FILTER (WHERE f.status = 'verified') AS verified_count
+                FROM financial_events f {joins} {where}
+                GROUP BY label ORDER BY net_cents DESC LIMIT :limit"""), params).mappings().all()
+        return [dict(r) for r in rows]
 
     def list_recent(self, limit: int = 20) -> List[dict]:
         with engine.connect() as connection:
@@ -250,6 +354,14 @@ class FinanceRepository:
                      "ORDER BY received_at DESC, created_at DESC LIMIT :limit"),
                 {"limit": limit},
             ).mappings().all()
+        return [dict(r) for r in rows]
+
+    def health_status(self) -> List[dict]:
+        """Integration health rows for the dashboard status panel (P0-3)."""
+        with engine.connect() as connection:
+            rows = connection.execute(text(
+                "SELECT integration, status, last_ok_at, last_error_at, last_detail, updated_at "
+                "FROM integration_health ORDER BY integration")).mappings().all()
         return [dict(r) for r in rows]
 
 

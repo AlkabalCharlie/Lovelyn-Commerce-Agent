@@ -77,3 +77,49 @@ def test_md_to_html_lists_wrap_consecutive_items():
 def test_md_to_html_blank_lines_split_paragraphs():
     html = _md_to_html("first\n\nsecond")
     assert "<p>first</p>" in html and "<p>second</p>" in html
+
+
+# ---- stale-page pruning (sitemap consistency guarantee) ----
+
+def test_build_site_prunes_stale_campaign_pages(tmp_path, monkeypatch):
+    """A campaign-*.html left over from a no-longer-published campaign must be
+    deleted on rebuild, so the published sitemap can never list a stale URL."""
+    from services import site_builder
+
+    class FakeRepo:
+        def list_published_campaigns(self):
+            return [{"id": "22222222-2222-2222-2222-222222222222", "headline": "Live"}]
+
+    monkeypatch.setattr(site_builder, "CampaignRepository", FakeRepo)
+    monkeypatch.setattr(site_builder, "render_campaign_page", lambda *a, **k: "<html></html>")
+    monkeypatch.setattr(site_builder, "_rest_url", lambda: "https://fake.supabase.co")
+
+    out = tmp_path / "docs"
+    out.mkdir()
+    (out / "campaign-11111111-1111-1111-1111-111111111111.html").write_text("stale")
+
+    site_builder.build_site(output_dir=str(out))
+
+    assert not (out / "campaign-11111111-1111-1111-1111-111111111111.html").exists()
+    assert (out / "campaign-22222222-2222-2222-2222-222222222222.html").exists()
+
+
+def test_build_site_never_touches_non_campaign_files(tmp_path, monkeypatch):
+    from services import site_builder
+
+    class EmptyRepo:
+        def list_published_campaigns(self):
+            return []
+
+    monkeypatch.setattr(site_builder, "CampaignRepository", EmptyRepo)
+    monkeypatch.setattr(site_builder, "_rest_url", lambda: "https://fake.supabase.co")
+
+    out = tmp_path / "docs"
+    out.mkdir()
+    (out / "campaign-deadbeef.html").write_text("looks like a stale real-id page")
+    (out / "notes.txt").write_text("keep me")
+
+    site_builder.build_site(output_dir=str(out))
+
+    assert not (out / "campaign-deadbeef.html").exists()  # real-id-shaped: pruned
+    assert (out / "notes.txt").exists()                   # non-campaign files kept

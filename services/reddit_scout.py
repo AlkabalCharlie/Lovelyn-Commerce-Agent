@@ -9,6 +9,22 @@ import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote_plus
 
+
+def draft_reply(post_title: str, product_name: str = None) -> str:
+    """DRAFT ONLY - the human copies, edits, and posts it by hand.
+    Honest-by-construction: discloses the affiliation and never invents facts.
+    The bot NEVER posts; this just cuts the human reply from 5 minutes to 30s."""
+    mention = f" something like {product_name}" if product_name else " a purpose-built tool"
+    return (
+        f"Re: {post_title}\n"
+        "Quick honest take: the fix that actually sticks is writing down the "
+        "specific step that keeps stalling you, then removing exactly that "
+        "step. If you want a ready-made tool for that," + mention +
+        " is one option - I'm affiliated with it, so take that with the "
+        "appropriate salt, and check the listing's real deliverables before "
+        "buying. Either way the checklist matters more than the tool."
+    )
+
 import requests
 
 USER_AGENT = "LovelynScout/1.0 (commerce research; contact owner)"

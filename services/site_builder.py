@@ -8,8 +8,15 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlencode
 
-from config.settings import SITE_BASE_URL, SUPABASE_ANON_KEY, SUPABASE_USERNAME
+from config.settings import (
+    OWNED_PRODUCT_URL,
+    SITE_BASE_URL,
+    SUPABASE_ANON_KEY,
+    SUPABASE_USERNAME,
+)
 from database.repositories import CampaignRepository
+
+import os as _os
 
 _CSS = "body{font-family:system-ui,sans-serif;margin:0;background:#f7f8fa;color:#111}" \
        ".wrap{max-width:720px;margin:0 auto;padding:32px 20px}" \
@@ -102,6 +109,12 @@ def _md_to_html(text: str) -> str:
     return "".join(blocks)
 
 
+_BUY_BUTTON = (
+    '<a class="cta" data-track="owned" href="{url}" rel="noopener" '
+    'target="_blank">Get the {name} toolkit &rarr;</a>'
+)
+
+
 def _utm(url: str, campaign_id: str) -> str:
     params = urlencode({"utm_source": "lovelyn", "utm_medium": "campaign", "utm_campaign": campaign_id[:8]})
     return f"{url}&{params}" if "?" in url else f"{url}?{params}"
@@ -116,7 +129,15 @@ def render_campaign_page(camp: dict, anon_key: str, rest_url: str, base_url: str
     description = html.escape(body_lines[0][:150]) if body_lines else headline
     product = html.escape(camp["product_name"])
     merchant = html.escape(camp["merchant"] or "Independent / Other")
-    cta = _utm(camp["product_url"], str(camp["id"]))
+    # Monetized link first: the tracked affiliate URL if the owner set one,
+    # otherwise fall back to the raw merchant URL (still disclosed honestly).
+    affiliate = (camp.get("affiliate_url") or "").strip()
+    cta = _utm(affiliate or camp["product_url"], str(camp["id"]))
+    cta_label = "View the product &rarr;"
+    buy_html = ""
+    if OWNED_PRODUCT_URL:
+        buy_html = _BUY_BUTTON.format(url=html.escape(OWNED_PRODUCT_URL, quote=True),
+                                      name=html.escape(camp["product_name"]))
     canonical = f"{base_url}campaign-{camp['id']}.html"
     beacon = _BEACON % {"rest": rest_url, "anon": anon_key, "cid": str(camp["id"])}
     return f"""<!doctype html>
@@ -130,7 +151,8 @@ def render_campaign_page(camp: dict, anon_key: str, rest_url: str, base_url: str
 <h1>{headline}</h1>
 <p><em>{merchant} &middot; {product}</em></p>
 <p>{body}</p>
-<a class="cta" data-track="1" href="{html.escape(cta, quote=True)}" rel="nofollow sponsored noopener" target="_blank">View the product &rarr;</a>
+<a class="cta" data-track="1" href="{html.escape(cta, quote=True)}" rel="nofollow sponsored noopener" target="_blank">{cta_label}</a>
+{buy_html}
 {_DISCLOSURE}
 </div>{beacon}</body></html>"""
 
@@ -156,15 +178,26 @@ def render_sitemap(camps: list, base_url: str) -> str:
     return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + "".join(urls) + "</urlset>"
 
 
-def build_site() -> int:
-    """Write docs/ folder for GitHub Pages. Returns number of campaign pages."""
+def build_site(output_dir: str | None = None) -> int:
+    """Write the GitHub Pages folder (default docs/). Returns # campaign pages.
+
+    output_dir lets tests/dry-runs target a scratch folder without touching
+    the real docs/ tree."""
     if not SUPABASE_ANON_KEY:
         raise ValueError("SUPABASE_ANON_KEY missing; cannot build traffic site.")
     repo = CampaignRepository()
     camps = repo.list_published_campaigns()
     rest = _rest_url()
-    out = Path("docs")
+    out = Path(output_dir or "docs")
     out.mkdir(exist_ok=True)
+    live_ids = {str(c["id"]) for c in camps}
+    removed = 0
+    for old in out.glob("campaign-*.html"):
+        if old.stem.removeprefix("campaign-") not in live_ids:
+            old.unlink()
+            removed += 1
+    if removed:
+        print(f"site_builder: pruned {removed} stale campaign page(s) from {out}/")
     for camp in camps:
         (out / f"campaign-{camp['id']}.html").write_text(
             render_campaign_page(camp, SUPABASE_ANON_KEY, rest, SITE_BASE_URL), encoding="utf-8"
