@@ -23,7 +23,9 @@ _CSS = "body{font-family:system-ui,sans-serif;margin:0;background:#f7f8fa;color:
        ".wrap{max-width:720px;margin:0 auto;padding:32px 20px}" \
        "a.cta{display:inline-block;margin-top:24px;padding:12px 22px;background:#0f6f5c;color:#fff;border-radius:8px;text-decoration:none}" \
        ".disclosure{margin-top:32px;font-size:12px;color:#666}" \
-       "h1{line-height:1.25}"
+       "h1{line-height:1.25}" \
+       ".hero{width:100%;max-width:720px;height:auto;border-radius:10px;display:block;margin:0 0 24px}" \
+       "@media (max-width:480px){.hero{margin:0 -20px 20px;border-radius:0}}"
 
 _DISCLOSURE = (
     '<p class="disclosure">Disclosure: if you buy through links on this page, '
@@ -62,6 +64,10 @@ _BEACON = """
 def _rest_url() -> str:
     ref = SUPABASE_USERNAME.split(".", 1)[1] if "." in SUPABASE_USERNAME else SUPABASE_USERNAME
     return f"https://{ref}.supabase.co"
+
+# Optional homepage hero visual. Rendered as a REAL <img> (not a link, not a
+# banner overlay): campaign titles/descriptions/buttons stay plain HTML.
+HERO_IMAGE = "assets/lovelyn-hero.png"
 
 
 def _md_to_html(text: str) -> str:
@@ -133,6 +139,15 @@ def render_campaign_page(camp: dict, anon_key: str, rest_url: str, base_url: str
     # Monetized link first: the tracked affiliate URL if the owner set one,
     # otherwise fall back to the raw merchant URL (still disclosed honestly).
     affiliate = (camp.get("affiliate_url") or "").strip()
+    # Owned products are OUR products: the honest disclosure differs.
+    dest = affiliate or camp["product_url"]
+    is_owned = "gumroad.com" in dest or "payhip.com" in dest
+    disclosure = (
+        '<p class="disclosure">Disclosure: this is our own product. If you buy '
+        "through this page we receive the proceeds at no extra cost to you. "
+        "Opinions are our own.</p>"
+        if is_owned else _DISCLOSURE
+    )
     cta = _utm(affiliate or camp["product_url"], str(camp["id"]))
     cta_label = "View the product &rarr;"
     buy_html = ""
@@ -154,7 +169,7 @@ def render_campaign_page(camp: dict, anon_key: str, rest_url: str, base_url: str
 <p>{body}</p>
 <a class="cta" data-track="1" href="{html.escape(cta, quote=True)}" rel="nofollow sponsored noopener" target="_blank">{cta_label}</a>
 {buy_html}
-{_DISCLOSURE}
+{disclosure}
 </div>{beacon}</body></html>"""
 
 
@@ -163,12 +178,17 @@ def render_index(camps: list) -> str:
         f'<li><a href="campaign-{html.escape(str(c["id"]))}.html">{html.escape(c["headline"])}</a></li>'
         for c in camps
     ) or "<li>No live campaigns yet.</li>"
+    hero = ""
+    if HERO_IMAGE:
+        hero = (f'<img class="hero" src="{HERO_IMAGE}" width="720" height="360" '
+                f'alt="Lovelyn - curated product reviews and guides" loading="eager" decoding="async">')
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="index, follow">
 <title>Lovelyn Live Campaigns</title>
 <style>{_CSS}</style></head>
-<body><div class="wrap"><h1>Lovelyn Live Campaigns</h1><ul>{items}</ul></div></body></html>"""
+<body><div class="wrap"><h1>Lovelyn Live Campaigns</h1>{hero}<ul>{items}</ul></div></body></html>"""
 
 
 def render_sitemap(camps: list, base_url: str) -> str:
