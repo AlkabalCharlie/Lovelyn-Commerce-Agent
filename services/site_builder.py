@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from config.settings import (
+    INITIAL_LAUNCH_CAMPAIGN_IDS,
     OWNED_PRODUCT_URL,
     SITE_BASE_URL,
     SUPABASE_ANON_KEY,
@@ -186,7 +187,10 @@ def build_site(output_dir: str | None = None) -> int:
     if not SUPABASE_ANON_KEY:
         raise ValueError("SUPABASE_ANON_KEY missing; cannot build traffic site.")
     repo = CampaignRepository()
-    camps = repo.list_published_campaigns()
+    camps = [
+        camp for camp in repo.list_published_campaigns()
+        if str(camp["id"]) in INITIAL_LAUNCH_CAMPAIGN_IDS
+    ]
     rest = _rest_url()
     out = Path(output_dir or "docs")
     out.mkdir(exist_ok=True)

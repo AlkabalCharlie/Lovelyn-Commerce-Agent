@@ -91,6 +91,12 @@ def test_build_site_prunes_stale_campaign_pages(tmp_path, monkeypatch):
             return [{"id": "22222222-2222-2222-2222-222222222222", "headline": "Live"}]
 
     monkeypatch.setattr(site_builder, "CampaignRepository", FakeRepo)
+    monkeypatch.setattr(
+        site_builder,
+        "INITIAL_LAUNCH_CAMPAIGN_IDS",
+        frozenset({"22222222-2222-2222-2222-222222222222"}),
+    )
+    monkeypatch.setattr(site_builder, "SUPABASE_ANON_KEY", "ANONKEY")
     monkeypatch.setattr(site_builder, "render_campaign_page", lambda *a, **k: "<html></html>")
     monkeypatch.setattr(site_builder, "_rest_url", lambda: "https://fake.supabase.co")
 
@@ -102,6 +108,37 @@ def test_build_site_prunes_stale_campaign_pages(tmp_path, monkeypatch):
 
     assert not (out / "campaign-11111111-1111-1111-1111-111111111111.html").exists()
     assert (out / "campaign-22222222-2222-2222-2222-222222222222.html").exists()
+
+
+def test_build_site_publishes_only_initial_launch_campaigns(tmp_path, monkeypatch):
+    from services import site_builder
+
+    launch_id = "b8d56c20-c801-4c97-ac8f-936bb5c36cba"
+    held_id = "36f0f37b-2e81-49c7-874b-285317abee7c"
+
+    class FakeRepo:
+        def list_published_campaigns(self):
+            return [
+                {"id": launch_id, "headline": "Launch"},
+                {"id": held_id, "headline": "Held"},
+            ]
+
+    monkeypatch.setattr(site_builder, "CampaignRepository", FakeRepo)
+    monkeypatch.setattr(site_builder, "SUPABASE_ANON_KEY", "ANONKEY")
+    monkeypatch.setattr(site_builder, "render_campaign_page", lambda *a, **k: "<html></html>")
+    monkeypatch.setattr(site_builder, "_rest_url", lambda: "https://fake.supabase.co")
+
+    out = tmp_path / "docs"
+    out.mkdir()
+    (out / f"campaign-{held_id}.html").write_text("held")
+
+    assert site_builder.build_site(output_dir=str(out)) == 1
+    assert (out / f"campaign-{launch_id}.html").exists()
+    assert not (out / f"campaign-{held_id}.html").exists()
+    assert f"campaign-{launch_id}.html" in (out / "index.html").read_text()
+    assert f"campaign-{held_id}.html" not in (out / "index.html").read_text()
+    assert f"campaign-{launch_id}.html" in (out / "sitemap.xml").read_text()
+    assert f"campaign-{held_id}.html" not in (out / "sitemap.xml").read_text()
 
 
 def test_build_site_never_touches_non_campaign_files(tmp_path, monkeypatch):

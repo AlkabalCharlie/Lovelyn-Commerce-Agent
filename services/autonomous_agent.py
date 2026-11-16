@@ -11,6 +11,7 @@ from config.settings import (
     BLUESKY_APP_PASSWORD,
     BLUESKY_HANDLE,
     DEVTO_API_KEY,
+    INITIAL_LAUNCH_CAMPAIGN_IDS,
     MEDIUM_API_KEY,
     OWNED_PRODUCT_URL,
     SITE_BASE_URL,
@@ -112,11 +113,15 @@ def run_daily_grind():
     approved = published = 0
     if AGENT_AUTONOMY == "full":
         for draft in camp_repo.get_all_campaigns_by_status("draft"):
+            if str(draft.id) not in INITIAL_LAUNCH_CAMPAIGN_IDS:
+                continue
             camp_repo.update_campaign_status(draft.id, "approved")
             approved += 1
         if approved:
             log_repo.log_action("APPROVE", f"Autonomously approved {approved} draft campaigns.")
         for camp in camp_repo.get_all_campaigns_by_status("approved"):
+            if str(camp.id) not in INITIAL_LAUNCH_CAMPAIGN_IDS:
+                continue
             camp_repo.publish_campaign(camp.id)
             published += 1
         if published:
@@ -129,7 +134,11 @@ def run_daily_grind():
     if not DEVTO_API_KEY:
         log_repo.log_action("CONFIG", "DEVTO_API_KEY missing or parked - Dev.to distribution skipped.")
     else:
-        for camp in camp_repo.list_published_unpushed("devto")[:MAX_POSTS_PER_CHANNEL_PER_RUN]:
+        launch_campaigns = [
+            camp for camp in camp_repo.list_published_unpushed("devto")
+            if str(camp["id"]) in INITIAL_LAUNCH_CAMPAIGN_IDS
+        ]
+        for camp in launch_campaigns[:MAX_POSTS_PER_CHANNEL_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
             if publish_to_devto(camp["headline"], camp["body"], url):
                 camp_repo.mark_pushed("devto", camp["id"])
@@ -137,7 +146,11 @@ def run_daily_grind():
     if not (BLUESKY_HANDLE and BLUESKY_APP_PASSWORD):
         log_repo.log_action("CONFIG", "Bluesky credentials missing - Bluesky distribution skipped.")
     else:
-        for camp in camp_repo.list_published_unpushed("bluesky")[:MAX_POSTS_PER_CHANNEL_PER_RUN]:
+        launch_campaigns = [
+            camp for camp in camp_repo.list_published_unpushed("bluesky")
+            if str(camp["id"]) in INITIAL_LAUNCH_CAMPAIGN_IDS
+        ]
+        for camp in launch_campaigns[:MAX_POSTS_PER_CHANNEL_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
             if publish_to_bluesky(BLUESKY_HANDLE, BLUESKY_APP_PASSWORD, camp["headline"], url):
                 camp_repo.mark_pushed("bluesky", camp["id"])
@@ -145,7 +158,11 @@ def run_daily_grind():
     if not MEDIUM_API_KEY:
         log_repo.log_action("CONFIG", "MEDIUM_API_KEY missing or parked - Medium distribution skipped.")
     else:
-        for camp in camp_repo.list_published_unpushed("medium")[:MAX_MEDIUM_POSTS_PER_RUN]:
+        launch_campaigns = [
+            camp for camp in camp_repo.list_published_unpushed("medium")
+            if str(camp["id"]) in INITIAL_LAUNCH_CAMPAIGN_IDS
+        ]
+        for camp in launch_campaigns[:MAX_MEDIUM_POSTS_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
             if publish_to_medium(camp["headline"], camp["body"], url):
                 camp_repo.mark_pushed("medium", camp["id"])
@@ -176,6 +193,8 @@ def run_daily_grind():
     winners = revived = killed = rewritten = 0
     now = datetime.now(timezone.utc)
     for row in camp_repo.get_traffic_stats():
+        if str(row["id"]) not in INITIAL_LAUNCH_CAMPAIGN_IDS:
+            continue
         created = row["created_at"]
         if created is None:
             continue

@@ -22,3 +22,6 @@ __pycache__/
 # OS specific files
 .DS_Store
 Thumbs.db
+# Supabase local state and per-project secret env (CLI auth tokens, service keys)
+supabase/.temp/
+.env.supabase
