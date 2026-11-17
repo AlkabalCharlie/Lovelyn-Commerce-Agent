@@ -2,11 +2,14 @@ from models.campaign import Campaign
 from services import autonomous_agent
 
 
-def test_daily_grind_only_promotes_initial_launch_campaigns(monkeypatch):
+def test_daily_grind_promotes_only_db_authorized_campaigns(monkeypatch):
     launch_id = "b8d56c20-c801-4c97-ac8f-936bb5c36cba"
     held_id = "36f0f37b-2e81-49c7-874b-285317abee7c"
-    launch = Campaign("launch-product", "Review", "Launch", "", id=launch_id)
-    held = Campaign("held-product", "Review", "Held", "", id=held_id)
+    AUTHORIZED = {launch_id}          # DB says: launch authorized, held not
+    launch = Campaign("launch-product", "Review", "Launch", "", id=launch_id,
+                      promotion_approved=True)
+    held = Campaign("held-product", "Review", "Held", "", id=held_id,
+                    promotion_approved=False)
     status_changes = []
     published_channels = []
 
@@ -21,11 +24,18 @@ def test_daily_grind_only_promotes_initial_launch_campaigns(monkeypatch):
         def get_all_campaigns_by_status(self, status):
             return [launch, held]
 
+        def is_promotion_approved(self, campaign_id):
+            return campaign_id in AUTHORIZED
+
         def update_campaign_status(self, campaign_id, status):
             status_changes.append((campaign_id, status))
 
         def publish_campaign(self, campaign_id):
+            # mirrors the real SQL gate: unauthorized -> refuse
+            if campaign_id not in AUTHORIZED:
+                return False
             status_changes.append((campaign_id, "published"))
+            return True
 
         def list_published_unpushed(self, channel):
             return [
@@ -76,9 +86,9 @@ def test_daily_grind_only_promotes_initial_launch_campaigns(monkeypatch):
     assert status_changes == [
         (launch_id, "approved"),
         (launch_id, "published"),
-    ]
+    ]   # held_id: never approved, never published - DB permission is FALSE
     assert published_channels == [
         ("devto", launch_id),
         ("bluesky", launch_id),
         ("medium", launch_id),
-    ]
+    ]   # held_id excluded from every channel

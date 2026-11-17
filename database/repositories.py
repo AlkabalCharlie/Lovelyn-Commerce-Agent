@@ -179,7 +179,7 @@ class CampaignRepository:
     def save_campaign(self, campaign: Campaign) -> str:
         with engine.begin() as connection:
             result = connection.execute(
-                text("INSERT INTO campaigns (product_id, campaign_type, headline, body, status) VALUES (:product_id, :campaign_type, :headline, :body, :status) RETURNING id"),
+                text("INSERT INTO campaigns (product_id, campaign_type, headline, body, status, promotion_approved) VALUES (:product_id, :campaign_type, :headline, :body, :status, FALSE) RETURNING id"),
                 {"product_id": campaign.product_id, "campaign_type": campaign.campaign_type, "headline": campaign.headline, "body": campaign.body, "status": campaign.status}
             )
             return str(result.scalar_one())
@@ -194,8 +194,8 @@ class CampaignRepository:
 
     def list_campaigns_for_product(self, product_id: str) -> List[Campaign]:
         with engine.connect() as connection:
-            rows = connection.execute(text("SELECT id, product_id, campaign_type, headline, body, status, created_at FROM campaigns WHERE product_id = :pid ORDER BY created_at DESC"), {"pid": product_id}).mappings().all()
-        return [Campaign(id=str(r["id"]), product_id=r["product_id"], campaign_type=r["campaign_type"], headline=r["headline"], body=r["body"], status=r["status"], created_at=r["created_at"]) for r in rows]
+            rows = connection.execute(text("SELECT id, product_id, campaign_type, headline, body, status, created_at, promotion_approved FROM campaigns WHERE product_id = :pid ORDER BY created_at DESC"), {"pid": product_id}).mappings().all()
+        return [Campaign(id=str(r["id"]), product_id=r["product_id"], campaign_type=r["campaign_type"], headline=r["headline"], body=r["body"], status=r["status"], created_at=r["created_at"], promotion_approved=r["promotion_approved"]) for r in rows]
 
     def update_campaign_status(self, campaign_id: str, status: str) -> bool:
         if status not in VALID_CAMPAIGN_STATUSES:
@@ -205,22 +205,50 @@ class CampaignRepository:
             return result.rowcount == 1
 
     def publish_campaign(self, campaign_id: str) -> bool:
+        """Publish ONLY with BOTH content approval and promotion authorization.
+        Rejected at the QUERY level: unauthorized rows match zero rows, so a
+        stale/buggy caller can never publish an unauthorized campaign."""
         with engine.begin() as connection:
-            result = connection.execute(text("UPDATE campaigns SET status = 'published' WHERE id = :id AND status = 'approved'"), {"id": campaign_id})
+            result = connection.execute(text(
+                "UPDATE campaigns SET status = 'published' "
+                "WHERE id = :id AND status = 'approved' AND promotion_approved = TRUE"),
+                {"id": campaign_id})
             return result.rowcount == 1
+
+    def set_promotion_approved(self, campaign_id: str, approved: bool) -> bool:
+        """Owner-controlled promotion authorization (separate from content
+        approval). Revocation takes effect immediately everywhere: publish,
+        distribution, and site generation all query this column."""
+        with engine.begin() as connection:
+            result = connection.execute(text(
+                "UPDATE campaigns SET promotion_approved = :a WHERE id = :id"),
+                {"a": approved, "id": campaign_id})
+            return result.rowcount == 1
+
+    def is_promotion_approved(self, campaign_id: str) -> bool:
+        """Live authorization check for the agent loop (fresh read every call,
+        so a revocation takes effect on the next decision, not next restart)."""
+        with engine.connect() as connection:
+            row = connection.execute(text(
+                "SELECT promotion_approved FROM campaigns WHERE id = :id"),
+                {"id": campaign_id}).scalar()
+            return bool(row)
 
     def get_all_campaigns_by_status(self, status: str) -> List[Campaign]:
         with engine.connect() as connection:
-            rows = connection.execute(text("SELECT id, product_id, campaign_type, headline, body, status, created_at FROM campaigns WHERE status = :status ORDER BY created_at ASC"), {"status": status}).mappings().all()
-        return [Campaign(id=str(r["id"]), product_id=r["product_id"], campaign_type=r["campaign_type"], headline=r["headline"], body=r["body"], status=r["status"], created_at=r["created_at"]) for r in rows]
+            rows = connection.execute(text("SELECT id, product_id, campaign_type, headline, body, status, created_at, promotion_approved FROM campaigns WHERE status = :status ORDER BY created_at ASC"), {"status": status}).mappings().all()
+        return [Campaign(id=str(r["id"]), product_id=r["product_id"], campaign_type=r["campaign_type"], headline=r["headline"], body=r["body"], status=r["status"], created_at=r["created_at"], promotion_approved=r["promotion_approved"]) for r in rows]
 
     def list_published_campaigns(self) -> List[dict]:
+        """Public-site source: published AND promotion-authorized only.
+        Rejected/archived/unauthorized rows can never reach the website."""
         with engine.connect() as connection:
             rows = connection.execute(text(
                 "SELECT c.id, c.headline, c.body, c.campaign_type, p.name AS product_name, "
                 "p.url AS product_url, p.merchant, p.affiliate_url FROM campaigns c "
                 "JOIN products p ON p.id = c.product_id "
-                "WHERE c.status = 'published' ORDER BY c.created_at DESC")).mappings().all()
+                "WHERE c.status = 'published' AND c.promotion_approved = TRUE "
+                "ORDER BY c.created_at DESC")).mappings().all()
         return [dict(r) for r in rows]
 
     def list_published_unpushed(self, channel: str) -> List[dict]:
@@ -228,7 +256,8 @@ class CampaignRepository:
         with engine.connect() as connection:
             rows = connection.execute(text(
                 f"SELECT c.id, c.headline, c.body FROM campaigns c "
-                f"WHERE c.status = 'published' AND c.{col} = FALSE ORDER BY c.created_at ASC")).mappings().all()
+                f"WHERE c.status = 'published' AND c.promotion_approved = TRUE "
+                f"AND c.{col} = FALSE ORDER BY c.created_at ASC")).mappings().all()
         return [dict(r) for r in rows]
 
     def mark_pushed(self, channel: str, campaign_id: str) -> bool:

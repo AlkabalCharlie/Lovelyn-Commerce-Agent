@@ -9,7 +9,6 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from config.settings import (
-    INITIAL_LAUNCH_CAMPAIGN_IDS,
     OWNED_PRODUCT_URL,
     SITE_BASE_URL,
     SUPABASE_ANON_KEY,
@@ -207,10 +206,11 @@ def build_site(output_dir: str | None = None) -> int:
     if not SUPABASE_ANON_KEY:
         raise ValueError("SUPABASE_ANON_KEY missing; cannot build traffic site.")
     repo = CampaignRepository()
-    camps = [
-        camp for camp in repo.list_published_campaigns()
-        if str(camp["id"]) in INITIAL_LAUNCH_CAMPAIGN_IDS
-    ]
+    # Authorization authority is the DATABASE: list_published_campaigns()
+    # returns only rows with status='published' AND promotion_approved=TRUE.
+    # No static allowlist: an owner grant in the DB makes a campaign eligible,
+    # and a revocation removes it on the next build.
+    camps = repo.list_published_campaigns()
     rest = _rest_url()
     out = Path(output_dir or "docs")
     out.mkdir(exist_ok=True)

@@ -11,7 +11,6 @@ from config.settings import (
     BLUESKY_APP_PASSWORD,
     BLUESKY_HANDLE,
     DEVTO_API_KEY,
-    INITIAL_LAUNCH_CAMPAIGN_IDS,
     MEDIUM_API_KEY,
     OWNED_PRODUCT_URL,
     SITE_BASE_URL,
@@ -44,6 +43,14 @@ from services.site_builder import build_site
 MAX_POSTS_PER_CHANNEL_PER_RUN = 2
 MAX_MEDIUM_POSTS_PER_RUN = 1  # Medium flags automation faster than Bluesky
 MAX_NEW_LEADS_PER_RUN = 10  # Reddit Scout insert cap (human replies, bot never posts)
+
+
+def _authorized(camp_repo, campaign_id: str) -> bool:
+    """Fresh DB read: is this campaign promotion-authorized?
+    Authorization lives in campaigns.promotion_approved (owner-controlled).
+    A fresh check per decision means an owner revocation takes effect on the
+    very next agent decision, not after a restart."""
+    return camp_repo.is_promotion_approved(campaign_id)
 
 
 def run_daily_grind():
@@ -113,17 +120,20 @@ def run_daily_grind():
     approved = published = 0
     if AGENT_AUTONOMY == "full":
         for draft in camp_repo.get_all_campaigns_by_status("draft"):
-            if str(draft.id) not in INITIAL_LAUNCH_CAMPAIGN_IDS:
+            # Content approval alone is NOT promotion: only drafts whose owner
+            # has granted promotion_approved may be auto-approved.
+            if not _authorized(camp_repo, draft.id):
                 continue
             camp_repo.update_campaign_status(draft.id, "approved")
             approved += 1
         if approved:
             log_repo.log_action("APPROVE", f"Autonomously approved {approved} draft campaigns.")
         for camp in camp_repo.get_all_campaigns_by_status("approved"):
-            if str(camp.id) not in INITIAL_LAUNCH_CAMPAIGN_IDS:
+            # publish_campaign re-checks the permission at the query level.
+            if not _authorized(camp_repo, camp.id):
                 continue
-            camp_repo.publish_campaign(camp.id)
-            published += 1
+            if camp_repo.publish_campaign(camp.id):
+                published += 1
         if published:
             log_repo.log_action("PUBLISH", f"Autonomously published {published} campaigns.")
     else:
@@ -136,7 +146,7 @@ def run_daily_grind():
     else:
         launch_campaigns = [
             camp for camp in camp_repo.list_published_unpushed("devto")
-            if str(camp["id"]) in INITIAL_LAUNCH_CAMPAIGN_IDS
+            if _authorized(camp_repo, camp["id"])
         ]
         for camp in launch_campaigns[:MAX_POSTS_PER_CHANNEL_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
@@ -148,7 +158,7 @@ def run_daily_grind():
     else:
         launch_campaigns = [
             camp for camp in camp_repo.list_published_unpushed("bluesky")
-            if str(camp["id"]) in INITIAL_LAUNCH_CAMPAIGN_IDS
+            if _authorized(camp_repo, camp["id"])
         ]
         for camp in launch_campaigns[:MAX_POSTS_PER_CHANNEL_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
@@ -160,7 +170,7 @@ def run_daily_grind():
     else:
         launch_campaigns = [
             camp for camp in camp_repo.list_published_unpushed("medium")
-            if str(camp["id"]) in INITIAL_LAUNCH_CAMPAIGN_IDS
+            if _authorized(camp_repo, camp["id"])
         ]
         for camp in launch_campaigns[:MAX_MEDIUM_POSTS_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
@@ -193,7 +203,25 @@ def run_daily_grind():
     winners = revived = killed = rewritten = 0
     now = datetime.now(timezone.utc)
     for row in camp_repo.get_traffic_stats():
-        if str(row["id"]) not in INITIAL_LAUNCH_CAMPAIGN_IDS:
+        # Revoked/unauthorized campaigns are skipped for promotion-related
+        # optimization (winner scaling, revival, rewrite). Archiving a dead
+        # unauthorized campaign is still allowed - that is cleanup, not
+        # promotion.
+        authorized = _authorized(camp_repo, row["id"])
+        if not authorized:
+            # only permit the kill path for unauthorized rows
+            created = row["created_at"]
+            if created is None:
+                continue
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            age_days = (now - created).days
+            if decide_action(row["views"], row["clicks"], age_days, row["agent_flag"],
+                             row.get("revenue_cents", 0) or 0) == "kill":
+                camp_repo.set_agent_flag(row["id"], "killed")
+                camp_repo.update_campaign_status(row["id"], "archived")
+                killed += 1
+                log_repo.log_action("KILL", f"'{row['headline']}' (unauthorized): archived dead campaign.")
             continue
         created = row["created_at"]
         if created is None:

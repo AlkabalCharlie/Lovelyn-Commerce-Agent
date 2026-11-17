@@ -15,3 +15,9 @@ class Campaign:
     status: str = "draft"
     id: Optional[str] = None
     created_at: Optional[datetime] = None
+    # Promotion authorization is SEPARATE from content approval: a campaign
+    # may be beautifully written and approved yet NOT authorized for public
+    # promotion. Defaults to False for every newly created campaign; only the
+    # owner grants it (pages/campaigns.py), and publish/distribute/site
+    # generation all refuse without it.
+    promotion_approved: bool = False
