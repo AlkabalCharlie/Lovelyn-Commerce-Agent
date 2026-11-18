@@ -117,3 +117,107 @@ def test_reporting_separates_test_data():
     from database import repositories
     src = inspect.getsource(repositories.FinanceRepository.net_profit_summary)
     assert "verified" in src
+
+
+# --- 5. Complete demand-to-campaign-to-content decision path -------------
+
+TV_CID = "b8d56c20-c801-4c97-ac8f-936bb5c36cba"
+DEBT_CID = "66d125ce-0523-492b-9679-3bd06d75e1be"
+
+
+def _products():
+    return [
+        {"id": TV_CID, "name": "TradingView",
+         "description": ("charting platform technical analysis indicators "
+                         "alerts stock charts trading tools subscription"),
+         "status": "approved"},
+        {"id": DEBT_CID, "name": "Be Free from Debt",
+         "description": ("debt repayment budgeting worksheets snowball "
+                         "avalanche payoff plan guide"),
+         "status": "approved"},
+    ]
+
+
+def test_scenario_1_tradingview_opportunity_selects_tradingview():
+    r = score_demand(
+        "TradingView vs TradingView alternatives - is the paid plan worth it?",
+        "comparing TradingView Essential against the free plan for charting "
+        "and alerts, is the subscription worth buying",
+        _products())
+    assert r["qualified"], r["reasons"]
+    assert r["matched_product_id"] == TV_CID
+    assert r["intent_score"] >= 22  # comparison intent detected
+
+
+def test_scenario_2_debt_opportunity_selects_debt_guide():
+    r = score_demand(
+        "Need a debt repayment plan - snowball or avalanche?",
+        "looking for practical debt payoff worksheets and budgeting help",
+        _products())
+    assert r["qualified"], r["reasons"]
+    assert r["matched_product_id"] == DEBT_CID
+
+
+def test_scenario_3_unrelated_opportunity_rejected():
+    r = score_demand(
+        "Best pizza toppings?",
+        "pineapple on pizza debate, casual food discussion",
+        _products())
+    assert not r["qualified"]
+    assert r["matched_product_id"] is None
+
+
+def test_opportunity_changes_generated_content_and_association():
+    from services.content_packages import (
+        opportunity_blogger_draft, opportunity_youtube_script)
+    opp_tv = {"title": "Is TradingView Essential worth $14.95/mo?",
+              "source_url": "https://www.reddit.com/r/TradingView/x1",
+              "score": 61, "intent_score": 24, "intent_categories": ["comparison"]}
+    opp_debt = {"title": "Need a debt payoff spreadsheet",
+                "source_url": "https://www.reddit.com/r/debtfree/x2",
+                "score": 55, "intent_score": 22, "intent_categories": ["seeking_solution"]}
+
+    tv_pkg = opportunity_youtube_script(TV_CID, f"https://lovelyn.matchqip.com/campaign-{TV_CID}.html",
+                                        opp_tv, f"test-opp-tv-{opp_tv['score']}")
+    debt_pkg = opportunity_blogger_draft(DEBT_CID, f"https://lovelyn.matchqip.com/campaign-{DEBT_CID}.html",
+                                         opp_debt, f"test-opp-debt-{opp_debt['score']}")
+    # Campaign association follows the opportunity's matched campaign
+    assert tv_pkg["opportunity"]["source_url"] == opp_tv["source_url"]
+    assert debt_pkg["opportunity"]["source_url"] == opp_debt["source_url"]
+    # Content differs per opportunity: TV hook quotes its question, debt
+    # draft contains the honest format-difference section
+    assert opp_tv["title"][:40] in tv_pkg["hook"]
+    assert any("spreadsheet" in s and "worksheets" in s
+               for s in [debt_pkg["body_markdown"]][0].split("\n\n"))
+    assert debt_pkg["origin"] == "demand_opportunity"
+    assert tv_pkg["origin"] == "demand_opportunity"
+
+
+def test_evergreen_package_labelled_and_no_opportunity_claim():
+    from services.content_packages import youtube_script_package
+    pkg = youtube_script_package(TV_CID, f"https://lovelyn.matchqip.com/campaign-{TV_CID}.html",
+                                 "Evergreen topic", "test-evergreen-label",
+                                 evergreen=True)
+    assert pkg["origin"] == "evergreen_campaign_asset"
+    assert pkg["opportunity"] is None
+
+
+def test_agent_calls_score_demand_and_uses_result():
+    """Trace: the scheduled run scores every scout lead, rejects unqualified
+    ones, stores provenance in notes, and lets the top score drive packages."""
+    import inspect
+    from services import autonomous_agent
+    src = inspect.getsource(autonomous_agent.run_daily_grind)
+    assert "score_demand" in src
+    assert 'if not verdict["qualified"]' in src
+    assert "intent=" in src and "score=" in src          # provenance in notes
+    assert 'max(qualified_leads' in src                   # top opportunity drives packages
+    assert "top is None" in src                           # evergreen only as fallback
+
+
+def test_score_demand_is_called_in_agent():
+    import inspect
+    from services import autonomous_agent
+    src = inspect.getsource(autonomous_agent.run_daily_grind)
+    # the actual call site, not merely an import
+    assert "score_demand(lead[\"title\"]" in src

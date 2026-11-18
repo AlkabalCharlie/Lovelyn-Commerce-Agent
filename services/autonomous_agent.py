@@ -183,62 +183,101 @@ def run_daily_grind():
 
     # 3.5 Reddit Scout: surface live buyer questions for the OWNER to answer by hand.
     # Read-only: no posting, no commenting, no login. Dedupe via UNIQUE url no-op.
+    # DEMAND-SCORED: every lead is scored by demand_matcher; only QUALIFIED
+    # buyer-intent posts are stored with their score + matched campaign in
+    # notes (provenance). Weak posts are rejected here, not stored.
+    # 3.6 Opportunity-driven packaging: the TOP-QUALIFIED lead feeds a
+    # campaign-specific package (opportunity source URL + score retained in
+    # the package). Evergreen packages are queued once, labelled evergreen,
+    # and never re-created (UNIQUE constraint makes reruns no-ops).
+    qualified_leads = []
     new_leads = 0
+    packages_queued = 0
     try:
         lead_repo = LeadRepository()
         active = [p for p in prod_repo.list_products() if p.status == "active"]
+        approved_products = [p for p in active if p.status == "approved"]
+        if not approved_products:
+            approved_products = active  # products table uses active as its live status
         terms = scout_from_products(active)
         if terms:
+            from services.demand_matcher import score_demand
             for lead in scout_reddit(terms):
                 if new_leads >= MAX_NEW_LEADS_PER_RUN:
                     break
-                if lead_repo.add_lead(lead["subreddit"], lead["title"], lead["url"]):
+                verdict = score_demand(lead["title"], "", approved_products,
+                                       lead.get("subreddit", ""))
+                if not verdict["qualified"]:
+                    continue  # weak/irrelevant opportunity: rejected, not stored
+                note = (f"intent={verdict['intent_score']}/40 "
+                        f"relevance={verdict['relevance_score']}/60 "
+                        f"score={verdict['score']}/100 "
+                        f"campaign_product={verdict.get('matched_product_name')} "
+                        f"signals={verdict.get('intent_categories')}")
+                if lead_repo.add_lead(lead["subreddit"], lead["title"],
+                                      lead["url"], notes=note):
                     new_leads += 1
-        log_repo.log_action("SCOUT", f"Reddit Scout surfaced {new_leads} new lead(s) "
-                                     f"for human reply (read-only; bot never posts).")
+                verdict["source_url"] = lead["url"]
+                verdict["title"] = lead["title"]
+                qualified_leads.append(verdict)
+        log_repo.log_action("SCOUT", f"Reddit Scout: {new_leads} NEW qualified lead(s) "
+                                     f"(buyer-intent scored; weak posts rejected at insert; read-only).")
     except Exception as exc:
         log_repo.log_action("SCOUT", f"Reddit Scout skipped this run: {type(exc).__name__}.")
 
-    # 3.6 Demand-to-content packages: score discovered conversations against
-    # approved products and queue production-ready packages for the channels
-    # the agent cannot publish to directly (YouTube script, Blogger draft,
-    # Pinterest pin). CHANNEL-ISOLATED: a queue failure never stops the run.
-    packages_queued = 0
+    # 3.6 Demand-to-content packages: queue production-ready packages for the
+    # channels the agent cannot publish to directly. Opportunity-led first:
+    # the highest-scoring qualified lead drives a source-specific package.
+    # Evergreen fallback: only when NO qualified opportunity exists, so we
+    # never pad the queue with predetermined content.
     try:
         from services.content_packages import (
             blogger_article_draft,
+            opportunity_blogger_draft,
+            opportunity_youtube_script,
             pinterest_pin_package,
             youtube_script_package,
         )
         from services.publishing_queue import ensure_queue_table, queue_count
         ensure_queue_table()
-        # Static, verified packages for the two PRIMARY campaigns (facts only,
-        # verified against live merchant pages 2026-11-18). Idempotent:
-        # UNIQUE(channel, campaign, title) makes reruns no-ops.
         tv = "b8d56c20-c801-4c97-ac8f-936bb5c36cba"
         debt = "66d125ce-0523-492b-9679-3bd06d75e1be"
         tv_url = f"{SITE_BASE_URL}campaign-{tv}.html"
         debt_url = f"{SITE_BASE_URL}campaign-{debt}.html"
-        if _authorized(camp_repo, tv):
-            youtube_script_package(tv, tv_url, "TradingView Free vs Paid: What Each Tier Actually Changes", "tv-free-vs-paid-shorts")
-            blogger_article_draft(tv, tv_url, "TradingView Free vs Paid in 2026: An Honest Tier Comparison", "tv-free-vs-paid-2026",
-                                  ["What the free tier includes - and who it genuinely serves.",
-                                   "What Essential adds: 5 indicators, 2 charts per tab, 20 alerts, no ads.",
-                                   "When paying is worth it: multi-chart workflows, alert-driven trading.",
-                                   "When it is not: single-market, single-timeframe traders."])
-            pinterest_pin_package(tv, tv_url, "TradingView Free vs Paid: The Real Differences", "tv-free-vs-paid-pin")
-            packages_queued += 1
-        if _authorized(camp_repo, debt):
-            youtube_script_package(debt, debt_url, "Snowball or Avalanche? Pick Your Debt Payoff Method in 45 Seconds", "debt-method-shorts")
-            blogger_article_draft(debt, debt_url, "Snowball vs Avalanche: Which Debt Payoff Plan Will You Actually Finish?", "snowball-vs-avalanche-2026",
-                                  ["Avalanche saves the most interest; snowball saves motivation.",
-                                   "Write every debt down first: balance, rate, minimum.",
-                                   "The method you abandon is the one that costs you.",
-                                   "Worksheet-based planning beats app-passive tracking for follow-through."])
-            pinterest_pin_package(debt, debt_url, "Snowball vs Avalanche: Pick Your Payoff Plan", "debt-method-pin")
-            packages_queued += 1
+
+        top = max(qualified_leads, key=lambda v: v["score"], default=None)
+        if top is not None and _authorized(camp_repo, tv):
+            pkg = opportunity_youtube_script(tv, tv_url, top, f"opp-{top['score']}-tv-shorts")
+            if pkg:
+                packages_queued += 1
+        if top is not None and _authorized(camp_repo, debt):
+            pkg = opportunity_blogger_draft(debt, debt_url, top, f"opp-{top['score']}-debt-draft")
+            if pkg:
+                packages_queued += 1
+        if top is None:
+            # Evergreen campaign assets: queued ONCE (UNIQUE makes reruns
+            # no-ops), labelled evergreen, only for authorized campaigns.
+            if _authorized(camp_repo, tv):
+                youtube_script_package(tv, tv_url, "TradingView Free vs Paid: What Each Tier Actually Changes", "tv-free-vs-paid-shorts", evergreen=True)
+                blogger_article_draft(tv, tv_url, "TradingView Free vs Paid in 2026: An Honest Tier Comparison", "tv-free-vs-paid-2026",
+                                      ["What the free tier includes - and who it genuinely serves.",
+                                       "What Essential adds: 5 indicators, 2 charts per tab, 20 alerts, no ads.",
+                                       "When paying is worth it: multi-chart workflows, alert-driven trading.",
+                                       "When it is not: single-market, single-timeframe traders."], evergreen=True)
+                pinterest_pin_package(tv, tv_url, "TradingView Free vs Paid: The Real Differences", "tv-free-vs-paid-pin", evergreen=True)
+                packages_queued += 1
+            if _authorized(camp_repo, debt):
+                youtube_script_package(debt, debt_url, "Snowball or Avalanche? Pick Your Debt Payoff Method in 45 Seconds", "debt-method-shorts", evergreen=True)
+                blogger_article_draft(debt, debt_url, "Snowball vs Avalanche: Which Debt Payoff Plan Will You Actually Finish?", "snowball-vs-avalanche-2026",
+                                      ["Avalanche saves the most interest; snowball saves motivation.",
+                                       "Write every debt down first: balance, rate, minimum.",
+                                       "The method you abandon is the one that costs you.",
+                                       "Worksheet-based planning beats app-passive tracking for follow-through."], evergreen=True)
+                pinterest_pin_package(debt, debt_url, "Snowball vs Avalanche: Pick Your Payoff Plan", "debt-method-pin", evergreen=True)
+                packages_queued += 1
         log_repo.log_action("QUEUE", f"Publishing queue: {queue_count()} queued item(s) "
-                                     f"waiting for owner publishing ({packages_queued} campaign package set(s) ensured).")
+                                     f"({packages_queued} package(s) ensured this run; "
+                                     f"opportunity-led: {top is not None}).")
     except Exception as exc:
         log_repo.log_action("QUEUE", f"Publishing queue step skipped: {type(exc).__name__}.")
 

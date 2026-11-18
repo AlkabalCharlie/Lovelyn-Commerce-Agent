@@ -50,7 +50,8 @@ CTA = {
 
 
 def youtube_script_package(campaign_id: str, campaign_url: str,
-                           topic: str, slug: str) -> dict | None:
+                           topic: str, slug: str, evergreen: bool = False,
+                           opportunity: dict | None = None) -> dict | None:
     """Full production-ready script package. NOT a rendered video (no ffmpeg
     available). 45-60s Shorts format."""
     facts = PRODUCT_FACTS.get(campaign_id)
@@ -59,6 +60,15 @@ def youtube_script_package(campaign_id: str, campaign_url: str,
     bullets = "\n".join(f"- {f}" for f in facts["facts"])
     package = {
         "format_type": "youtube_shorts_script",
+        "origin": ("demand_opportunity" if opportunity
+                   else "evergreen_campaign_asset" if evergreen
+                   else "unspecified"),
+        "opportunity": ({"source_url": opportunity.get("source_url"),
+                         "title": opportunity.get("title"),
+                         "score": opportunity.get("score"),
+                         "intent_score": opportunity.get("intent_score"),
+                         "intent_categories": opportunity.get("intent_categories")}
+                        if opportunity else None),
         "note": ("SCRIPT PACKAGE ONLY — video rendering requires ffmpeg, "
                  "which is not available in this environment. Owner renders "
                  "with any TTS/slideshow tool, then uploads manually."),
@@ -91,14 +101,68 @@ def youtube_script_package(campaign_id: str, campaign_url: str,
     return package
 
 
+def opportunity_youtube_script(campaign_id: str, campaign_url: str,
+                               opportunity: dict, slug: str) -> dict | None:
+    """Script package TAILORED to a discovered opportunity: the hook answers
+    the actual question asked, and the opportunity provenance travels with
+    the package."""
+    topic = (opportunity.get("title") or "Buyer question")[:95]
+    pkg = youtube_script_package(campaign_id, campaign_url, topic, slug,
+                                 evergreen=False, opportunity=opportunity)
+    if pkg:
+        pkg["hook"] = (f"Someone just asked: '{topic}'. Here's the direct, "
+                       f"fact-checked answer.")
+    return pkg
+
+
+def opportunity_blogger_draft(campaign_id: str, campaign_url: str,
+                              opportunity: dict, slug: str) -> dict | None:
+    """Blogger draft answering the opportunity's actual question. For
+    worksheet/format objections (e.g. 'looking for a spreadsheet'), the draft
+    honestly addresses what the guide format does and does not provide."""
+    facts = PRODUCT_FACTS.get(campaign_id)
+    if not facts:
+        return None
+    topic = (opportunity.get("title") or "Buyer question")[:95]
+    is_debt = campaign_id.startswith("66d1")
+    sections = [
+        f"The question, verbatim from a real discussion: '{topic}'.",
+        ("What actually solves this: list every debt with balance, rate and "
+         "minimum; choose snowball (early wins) or avalanche (least interest); "
+         "automate minimums; throw every spare dollar at the target.")
+        if is_debt else
+        ("The facts: " + " ".join(facts["facts"])),
+    ]
+    if is_debt:
+        sections.append(
+            "Format honesty: this is a guide with fill-in worksheets, not an "
+            "interactive spreadsheet. If you want formulas that recalculate "
+            "your debt-free date automatically, a spreadsheet tool fits "
+            "better. If you want the methods explained with templates to "
+            "fill in by hand, this $7 DOCX pack fits.")
+    sections.append("Verified facts: " + " ".join(facts["facts"]))
+    package = blogger_article_draft(campaign_id, campaign_url,
+                                    f"Answering: {topic}", slug, sections,
+                                    evergreen=False)
+    if package:
+        package["origin"] = "demand_opportunity"
+        package["opportunity"] = {"source_url": opportunity.get("source_url"),
+                                  "title": opportunity.get("title"),
+                                  "score": opportunity.get("score")}
+    return package
+
+
 def blogger_article_draft(campaign_id: str, campaign_url: str, title: str,
-                          slug: str, sections: list[str]) -> dict | None:
+                          slug: str, sections: list[str],
+                          evergreen: bool = False) -> dict | None:
     facts = PRODUCT_FACTS.get(campaign_id)
     if not facts:
         return None
     body = "\n\n".join(sections)
     package = {
         "format_type": "blogger_article_markdown",
+        "origin": ("evergreen_campaign_asset" if evergreen
+                   else "unspecified"),
         "title": title[:95],
         "body_markdown": body + (f"\n\n{CTA[campaign_id]} {campaign_url}\n\n"
                                  f"*{facts['disclosure']}*"),
@@ -112,12 +176,14 @@ def blogger_article_draft(campaign_id: str, campaign_url: str, title: str,
 
 
 def pinterest_pin_package(campaign_id: str, campaign_url: str, pin_title: str,
-                          slug: str) -> dict | None:
+                          slug: str, evergreen: bool = False) -> dict | None:
     facts = PRODUCT_FACTS.get(campaign_id)
     if not facts:
         return None
     package = {
         "format_type": "pin_package",
+        "origin": ("evergreen_campaign_asset" if evergreen
+                   else "unspecified"),
         "pin_title": pin_title[:95],
         "pin_description": (
             f"{facts['facts'][1] if len(facts['facts']) > 1 else facts['facts'][0]} "

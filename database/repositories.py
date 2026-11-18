@@ -48,16 +48,17 @@ class LeadRepository:
     """Reddit Scout leads: links for the HUMAN to answer by hand."""
 
     def add_lead(self, subreddit: str, title: str, url: str,
-                 product_id: str = None) -> bool:
+                 product_id: str = None, notes: str = None) -> bool:
         """Insert a lead. UNIQUE url + ON CONFLICT DO NOTHING makes repeats a no-op.
-        Returns True only when a NEW row was inserted."""
+        Returns True only when a NEW row was inserted. notes carries the
+        demand-score provenance (intent, matched campaign, score)."""
         with engine.begin() as connection:
             result = connection.execute(
-                text("INSERT INTO leads (product_id, subreddit, title, url) "
-                     "VALUES (:product_id, :subreddit, :title, :url) "
+                text("INSERT INTO leads (product_id, subreddit, title, url, notes) "
+                     "VALUES (:product_id, :subreddit, :title, :url, :notes) "
                      "ON CONFLICT (url) DO NOTHING RETURNING id"),
                 {"product_id": product_id, "subreddit": subreddit,
-                 "title": title, "url": url},
+                 "title": title, "url": url, "notes": notes},
             )
             return result.first() is not None
 
