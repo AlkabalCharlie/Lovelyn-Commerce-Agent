@@ -49,6 +49,12 @@ def test_daily_grind_promotes_only_db_authorized_campaigns(monkeypatch):
         def get_traffic_stats(self):
             return []
 
+        def verified_revenue_by_campaign(self):
+            return {}
+
+        def set_agent_flag(self, campaign_id, flag):
+            return True
+
     class FakeLogs:
         def log_action(self, *args):
             pass

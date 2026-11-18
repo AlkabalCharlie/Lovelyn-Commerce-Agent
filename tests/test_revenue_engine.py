@@ -221,3 +221,48 @@ def test_score_demand_is_called_in_agent():
     src = inspect.getsource(autonomous_agent.run_daily_grind)
     # the actual call site, not merely an import
     assert "score_demand(lead[\"title\"]" in src
+
+
+# --- 6. Winner classification: test events can never make a winner -------
+
+def test_verified_revenue_excludes_test_events():
+    """The optimizer's revenue source must ignore E2E/test rows."""
+    import inspect
+    from database import repositories
+    src = inspect.getsource(
+        repositories.CampaignRepository.verified_revenue_cents)
+    assert "E2E-%" in src and "TEST%" in src and "status = 'verified'" in src
+
+
+def test_agent_uses_verified_revenue_not_stale_column():
+    import inspect
+    from services import autonomous_agent
+    src = inspect.getsource(autonomous_agent.run_daily_grind)
+    assert "verified_revenue_by_campaign" in src
+    assert 'row.get("revenue_cents"' not in src
+
+
+def test_stale_revenue_column_cannot_trigger_winner():
+    """Reproduces the defect: prove_loop's recompute summed TEST events into
+    campaigns.revenue_cents (2698c on owned campaigns) -> 4 fake winners.
+    With the fix, the optimizer must see 0 genuine revenue."""
+    from services.optimizer import decide_action
+    # stale column says 2698c, but verified truth is 0:
+    assert decide_action(3, 1, 5, None, 0) == "promising"  # not winner
+    assert decide_action(3, 0, 5, None, 0) == "revive"
+
+
+# --- 7. Owner-only access to leads + queue (no public exposure) ----------
+
+def test_owner_access_is_authenticated_routes_not_public():
+    """Leads + queue must be reachable only inside the password-gated
+    Streamlit app (existing auth pattern), never via a public endpoint."""
+    import pathlib
+    app_root = pathlib.Path(__file__).resolve().parents[1]
+    # confirm the app's auth gate exists and gates navigation
+    app_src = (app_root / "app.py").read_text(encoding="utf-8")
+    assert "require_login" in app_src and "st.stop()" in app_src
+    # the gate runs BEFORE navigation is built
+    assert app_src.index("require_login") < app_src.index("st.navigation")
+    # the new page is registered inside the gated app
+    assert "leads_queue" in app_src

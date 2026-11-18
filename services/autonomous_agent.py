@@ -281,9 +281,14 @@ def run_daily_grind():
     except Exception as exc:
         log_repo.log_action("QUEUE", f"Publishing queue step skipped: {type(exc).__name__}.")
 
-    # 4. Revenue-aware kill/scale on real traffic
+    # 4. Revenue-aware kill/scale on real traffic — revenue truth is computed
+    # LIVE from verified financial_events only (excluding tests/refunds), so a
+    # stale or test-contaminated campaigns.revenue_cents column can NEVER
+    # manufacture a winner. This closes the residual winner-label defect.
     winners = revived = killed = rewritten = 0
     now = datetime.now(timezone.utc)
+    # Pre-fetch verified revenue for every campaign in ONE query (no N+1).
+    _verified_rev = camp_repo.verified_revenue_by_campaign()
     for row in camp_repo.get_traffic_stats():
         # Revoked/unauthorized campaigns are skipped for promotion-related
         # optimization (winner scaling, revival, rewrite). Archiving a dead
@@ -299,7 +304,7 @@ def run_daily_grind():
                 created = created.replace(tzinfo=timezone.utc)
             age_days = (now - created).days
             if decide_action(row["views"], row["clicks"], age_days, row["agent_flag"],
-                             row.get("revenue_cents", 0) or 0) == "kill":
+                             _verified_rev.get(str(row["id"]), 0)) == "kill":
                 camp_repo.set_agent_flag(row["id"], "killed")
                 camp_repo.update_campaign_status(row["id"], "archived")
                 killed += 1
@@ -311,8 +316,13 @@ def run_daily_grind():
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
         age_days = (now - created).days
-        revenue_cents = row.get("revenue_cents", 0) or 0
-        action = decide_action(row["views"], row["clicks"], age_days, row["agent_flag"], revenue_cents)
+        # Revenue truth: recomputed per-campaign from VERIFIED financial events
+        # only. campaigns.revenue_cents is ignored — prove_loop.py's recompute
+        # summed TEST events into it (2698c on every owned campaign), and the
+        # next agent run promoted four campaigns to 'winner' on test money.
+        revenue_cents = _verified_rev.get(str(row["id"]), 0)
+        action = decide_action(row["views"], row["clicks"], age_days,
+                               row["agent_flag"], revenue_cents)
 
         if action == "winner":
             camp_repo.set_agent_flag(row["id"], "winner")

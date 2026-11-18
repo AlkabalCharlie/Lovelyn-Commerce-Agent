@@ -295,6 +295,38 @@ class CampaignRepository:
             result = connection.execute(text("UPDATE campaigns SET agent_flag = :flag WHERE id = :id"), {"flag": flag, "id": campaign_id})
             return result.rowcount == 1
 
+    def verified_revenue_cents(self, campaign_id: str) -> int:
+        """Revenue truth for optimizer decisions: SUM of VERIFIED financial
+        events attributed to this campaign. Excludes test transactions (by
+        external_id/note markers), refunds/reversals (status), and pending
+        events. This is the ONLY revenue source the optimizer may trust."""
+        with engine.connect() as connection:
+            total = connection.execute(text(
+                "SELECT COALESCE(SUM(f.amount_cents), 0) "
+                "FROM financial_events f "
+                "WHERE f.campaign_id = :cid "
+                "AND f.status = 'verified' "
+                "AND f.external_id NOT LIKE 'E2E-%' "
+                "AND f.external_id NOT LIKE '%TEST%' "
+                "AND f.external_id NOT LIKE '%PINGTEST%'"),
+                {"cid": campaign_id}).scalar()
+            return int(total or 0)
+
+    def verified_revenue_by_campaign(self) -> dict:
+        """Single-query variant of verified_revenue_cents for the optimizer's
+        per-run sweep (avoids N+1). Same exclusion rules."""
+        with engine.connect() as connection:
+            rows = connection.execute(text(
+                "SELECT f.campaign_id, COALESCE(SUM(f.amount_cents), 0) AS total "
+                "FROM financial_events f "
+                "WHERE f.campaign_id IS NOT NULL "
+                "AND f.status = 'verified' "
+                "AND f.external_id NOT LIKE 'E2E-%' "
+                "AND f.external_id NOT LIKE '%TEST%' "
+                "AND f.external_id NOT LIKE '%PINGTEST%' "
+                "GROUP BY f.campaign_id")).mappings().all()
+        return {str(r["campaign_id"]): int(r["total"]) for r in rows}
+
 
 class FinanceRepository:
     def add_event(self, event: FinancialEvent, campaign_id=None, product_id=None,

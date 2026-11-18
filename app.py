@@ -58,6 +58,7 @@ traffic = st.Page("pages/traffic.py", title="Traffic", icon="📈")
 finance = st.Page("pages/finance.py", title="Finance", icon="💰")
 integrations = st.Page("pages/integrations.py", title="Integrations", icon="🔌")
 agent_logs = st.Page("pages/agent_logs.py", title="Agent Logs", icon="🤖")
+leads_queue = st.Page("pages/leads_queue.py", title="Leads & Queue", icon="🎯")
 
-nav = st.navigation([overview, products, campaigns, traffic, finance, integrations, agent_logs])
+nav = st.navigation([overview, products, campaigns, traffic, finance, integrations, agent_logs, leads_queue])
 nav.run()
