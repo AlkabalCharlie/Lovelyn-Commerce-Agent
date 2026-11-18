@@ -121,9 +121,14 @@ _BUY_BUTTON = (
 )
 
 
-def _utm(url: str, campaign_id: str) -> str:
-    params = urlencode({"utm_source": "lovelyn", "utm_medium": "campaign", "utm_campaign": campaign_id[:8]})
-    return f"{url}&{params}" if "?" in url else f"{url}?{params}"
+def _utm(url: str, campaign_id: str, include_campaign_id: bool = False) -> str:
+    params = {"utm_source": "lovelyn", "utm_medium": "campaign", "utm_campaign": campaign_id[:8]}
+    if include_campaign_id:
+        # Owned-product checkout: the gumroad-ping Edge Function attributes a
+        # sale to a campaign by reading campaign_id from the buyer's URL params.
+        params["campaign_id"] = campaign_id
+    query = urlencode(params)
+    return f"{url}&{query}" if "?" in url else f"{url}?{query}"
 
 
 def render_campaign_page(camp: dict, anon_key: str, rest_url: str, base_url: str) -> str:
@@ -147,7 +152,7 @@ def render_campaign_page(camp: dict, anon_key: str, rest_url: str, base_url: str
         "Opinions are our own.</p>"
         if is_owned else _DISCLOSURE
     )
-    cta = _utm(affiliate or camp["product_url"], str(camp["id"]))
+    cta = _utm(dest, str(camp["id"]), include_campaign_id=is_owned)
     cta_label = "View the product &rarr;"
     buy_html = ""
     if OWNED_PRODUCT_URL:

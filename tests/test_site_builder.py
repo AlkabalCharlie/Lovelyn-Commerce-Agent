@@ -159,3 +159,18 @@ def test_build_site_never_touches_non_campaign_files(tmp_path, monkeypatch):
 
     assert not (out / "campaign-deadbeef.html").exists()  # real-id-shaped: pruned
     assert (out / "notes.txt").exists()                   # non-campaign files kept
+
+def test_owned_checkout_carries_campaign_id_for_attribution():
+    """The gumroad-ping Edge Function attributes a sale by reading campaign_id
+    from the buyer's URL params. Owned checkouts MUST carry it."""
+    owned = dict(CAMP, product_url="https://chukafor.gumroad.com/l/baqctc")
+    page = render_campaign_page(owned, "ANONKEY", "https://ref.supabase.co", BASE)
+    assert "campaign_id=abc-123" in page
+
+
+def test_affiliate_links_do_not_carry_campaign_id():
+    """Affiliate URLs must not be altered beyond UTM params (directive rule)."""
+    affiliate = dict(CAMP, product_url="https://example.com/p",
+                     affiliate_url="https://www.tradingview.com/black-friday/?aff_id=170584")
+    page = render_campaign_page(affiliate, "ANONKEY", "https://ref.supabase.co", BASE)
+    assert "campaign_id=" not in page.split('data-track="1"')[1].split("</a>")[0]

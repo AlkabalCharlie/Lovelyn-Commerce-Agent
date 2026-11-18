@@ -204,6 +204,15 @@ class CampaignRepository:
             result = connection.execute(text("UPDATE campaigns SET status = :status WHERE id = :id"), {"status": status, "id": campaign_id})
             return result.rowcount == 1
 
+    def update_campaign_copy(self, campaign_id: str, headline: str, body: str) -> bool:
+        """Owner-directed copy improvement for an already-published campaign.
+        Does NOT touch status, promotion approval, or any attribution field."""
+        with engine.begin() as connection:
+            result = connection.execute(text(
+                "UPDATE campaigns SET headline = :h, body = :b WHERE id = :id"),
+                {"h": headline, "b": body, "id": campaign_id})
+            return result.rowcount == 1
+
     def publish_campaign(self, campaign_id: str) -> bool:
         """Publish ONLY with BOTH content approval and promotion authorization.
         Rejected at the QUERY level: unauthorized rows match zero rows, so a
