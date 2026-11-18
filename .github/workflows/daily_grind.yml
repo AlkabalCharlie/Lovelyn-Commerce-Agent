@@ -28,11 +28,11 @@ jobs:
       - name: Install Playwright chromium (tier 3 extraction)
         run: python -m playwright install chromium
 
-      # Safety gate: fail the run if the four-campaign launch allowlist is
+      # Safety gate: fail the run if the promotion-authorization gate is
       # missing from the checked-out code. A scheduled run must never execute
       # an older, unrestricted agent that would rebuild the 30-campaign site.
-      - name: Verify launch allowlist is present
-        run: python -c "from config.settings import INITIAL_LAUNCH_CAMPAIGN_IDS; assert len(INITIAL_LAUNCH_CAMPAIGN_IDS) == 4"
+      - name: Verify promotion-authorization gate is present
+        run: python -c "import inspect; from database import repositories; assert 'promotion_approved = TRUE' in inspect.getsource(repositories.CampaignRepository.publish_campaign)"
 
       - name: Run test suite
         run: python -m pytest tests -q

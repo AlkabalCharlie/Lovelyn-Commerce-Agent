@@ -29,13 +29,10 @@ AGENT_AUTONOMY = _get_setting("AGENT_AUTONOMY", "full").lower()
 
 SITE_BASE_URL = _get_setting("SITE_BASE_URL", "https://lovelyn.matchqip.com/")
 
-# Only these verified campaigns may be auto-published or promoted in the initial launch.
-INITIAL_LAUNCH_CAMPAIGN_IDS = frozenset({
-    "b8d56c20-c801-4c97-ac8f-936bb5c36cba",
-    "495a7cc2-6861-4818-b2c2-1729bf6955cc",
-    "66d125ce-0523-492b-9679-3bd06d75e1be",
-    "2b6fb996-c048-435b-82d8-9a64d196a1b8",
-})
+# Promotion authorization is DATABASE-driven (campaigns.promotion_approved,
+# owner-controlled). The static launch allowlist below is RETIRED: it was the
+# transitional gate before the migration existed and would now override or
+# shadow explicit database grants/revocations.
 
 DEVTO_API_KEY = _get_setting("DEVTO_API_KEY")
 BLUESKY_HANDLE = _get_setting("BLUESKY_HANDLE")
