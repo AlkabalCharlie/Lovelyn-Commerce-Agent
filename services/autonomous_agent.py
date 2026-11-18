@@ -199,6 +199,49 @@ def run_daily_grind():
     except Exception as exc:
         log_repo.log_action("SCOUT", f"Reddit Scout skipped this run: {type(exc).__name__}.")
 
+    # 3.6 Demand-to-content packages: score discovered conversations against
+    # approved products and queue production-ready packages for the channels
+    # the agent cannot publish to directly (YouTube script, Blogger draft,
+    # Pinterest pin). CHANNEL-ISOLATED: a queue failure never stops the run.
+    packages_queued = 0
+    try:
+        from services.content_packages import (
+            blogger_article_draft,
+            pinterest_pin_package,
+            youtube_script_package,
+        )
+        from services.publishing_queue import ensure_queue_table, queue_count
+        ensure_queue_table()
+        # Static, verified packages for the two PRIMARY campaigns (facts only,
+        # verified against live merchant pages 2026-11-18). Idempotent:
+        # UNIQUE(channel, campaign, title) makes reruns no-ops.
+        tv = "b8d56c20-c801-4c97-ac8f-936bb5c36cba"
+        debt = "66d125ce-0523-492b-9679-3bd06d75e1be"
+        tv_url = f"{SITE_BASE_URL}campaign-{tv}.html"
+        debt_url = f"{SITE_BASE_URL}campaign-{debt}.html"
+        if _authorized(camp_repo, tv):
+            youtube_script_package(tv, tv_url, "TradingView Free vs Paid: What Each Tier Actually Changes", "tv-free-vs-paid-shorts")
+            blogger_article_draft(tv, tv_url, "TradingView Free vs Paid in 2026: An Honest Tier Comparison", "tv-free-vs-paid-2026",
+                                  ["What the free tier includes - and who it genuinely serves.",
+                                   "What Essential adds: 5 indicators, 2 charts per tab, 20 alerts, no ads.",
+                                   "When paying is worth it: multi-chart workflows, alert-driven trading.",
+                                   "When it is not: single-market, single-timeframe traders."])
+            pinterest_pin_package(tv, tv_url, "TradingView Free vs Paid: The Real Differences", "tv-free-vs-paid-pin")
+            packages_queued += 1
+        if _authorized(camp_repo, debt):
+            youtube_script_package(debt, debt_url, "Snowball or Avalanche? Pick Your Debt Payoff Method in 45 Seconds", "debt-method-shorts")
+            blogger_article_draft(debt, debt_url, "Snowball vs Avalanche: Which Debt Payoff Plan Will You Actually Finish?", "snowball-vs-avalanche-2026",
+                                  ["Avalanche saves the most interest; snowball saves motivation.",
+                                   "Write every debt down first: balance, rate, minimum.",
+                                   "The method you abandon is the one that costs you.",
+                                   "Worksheet-based planning beats app-passive tracking for follow-through."])
+            pinterest_pin_package(debt, debt_url, "Snowball vs Avalanche: Pick Your Payoff Plan", "debt-method-pin")
+            packages_queued += 1
+        log_repo.log_action("QUEUE", f"Publishing queue: {queue_count()} queued item(s) "
+                                     f"waiting for owner publishing ({packages_queued} campaign package set(s) ensured).")
+    except Exception as exc:
+        log_repo.log_action("QUEUE", f"Publishing queue step skipped: {type(exc).__name__}.")
+
     # 4. Revenue-aware kill/scale on real traffic
     winners = revived = killed = rewritten = 0
     now = datetime.now(timezone.utc)
@@ -296,7 +339,7 @@ def run_daily_grind():
     summary = (f"Daily grind complete. Enriched: {enriched}, Generated: {generated}, "
                f"Approved: {approved}, Published: {published}, "
                f"Dev.to: {pushed['devto']}, Bluesky: {pushed['bluesky']}, Medium: {pushed['medium']}, "
-               f"New leads: {new_leads}, "
+               f"New leads: {new_leads}, Queued packages: {packages_queued}, "
                f"Winners scaled: {winners}, Revived: {revived}, Killed: {killed}, "
                f"Rewritten: {rewritten}, Site pages: {pages}.")
     log_repo.log_action("COMPLETE", summary)
