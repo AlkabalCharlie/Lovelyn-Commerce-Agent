@@ -28,9 +28,11 @@ def decide_action(views: int, clicks: int, age_days: int, flag, revenue_cents: i
     if revenue_cents >= REVENUE_THRESHOLD_CENTS and flag is None:
         return "winner"
     
-    # Clicks without revenue still count as winner (affiliate sales may lag)
+    # A click is PROMISING (a real human moved toward checkout) but is NOT
+    # revenue. Variants/angle-scaling are reserved for actual money so the
+    # agent's generation budget goes to proven products, not curiosity clicks.
     if clicks >= 1 and flag is None:
-        return "winner"
+        return "promising"
     
     # Kill: many views, no clicks, no revenue, old enough
     if clicks == 0 and revenue_cents == 0 and views >= 10 and age_days >= 7 and flag in (None, "revived"):
