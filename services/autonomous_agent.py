@@ -380,30 +380,37 @@ def run_daily_grind():
     # number rejects the rewrite and the page keeps its current copy.
     copy_refreshed = 0
     if OPENAI_API_KEY:
-        from services.conversion_copywriter import rewrite_for_conversion, should_refresh
-        refreshed_ids = set()
-        limit = max(1, int(os.getenv("COPY_REFRESH_DAILY_LIMIT", "3") or 3))
-        # Prefer weakest-first: views-but-no-clicks, oldest first.
-        candidates = sorted(
-            [r for r in camp_repo.get_traffic_stats()
-             if _authorized(camp_repo, r["id"]) and should_refresh(r, refreshed_ids)
-             and _verified_rev.get(str(r["id"]), 0) == 0],
-            key=lambda r: (-(r.get("views") or 0), r.get("created_at") or now))
-        for row in candidates[:limit]:
-            facts = {"product": row["product_name"], "merchant": row["merchant"],
-                     "description": row["description"] or "",
-                     "price": row["price"] if row["price"] is not None else ""}
-            result = rewrite_for_conversion(row["headline"], row["body"], facts,
-                                            row["clicks"],
-                                            _verified_rev.get(str(row["id"]), 0))
-            if result:
-                camp_repo.update_campaign_copy(row["id"], result[0], result[1])
-                refreshed_ids.add(str(row["id"]))
-                copy_refreshed += 1
-                log_repo.log_action("COPY", f"Conversion rewrite applied to '{row['headline']}' "
-                                            f"({row['views']} views, {row['clicks']} clicks -> fresh copy).")
-        if copy_refreshed:
-            log_repo.log_action("COPY", f"Daily copy refresh: {copy_refreshed} page(s) rewritten (limit {limit}).")
+        try:
+            from services.conversion_copywriter import rewrite_for_conversion, should_refresh
+            refreshed_ids = set()
+            limit = max(1, int(os.getenv("COPY_REFRESH_DAILY_LIMIT", "3") or 3))
+            # Prefer weakest-first: views-but-no-clicks, oldest first.
+            candidates = sorted(
+                [r for r in camp_repo.get_traffic_stats()
+                 if _authorized(camp_repo, r["id"]) and should_refresh(r, refreshed_ids)
+                 and _verified_rev.get(str(r["id"]), 0) == 0],
+                key=lambda r: (-(r.get("views") or 0), r.get("created_at") or now))
+            for row in candidates[:limit]:
+                try:
+                    facts = {"product": row["product_name"], "merchant": row["merchant"],
+                             "description": row["description"] or "",
+                             "price": row["price"] if row["price"] is not None else ""}
+                    result = rewrite_for_conversion(row["headline"], row["body"], facts,
+                                                    row["clicks"],
+                                                    _verified_rev.get(str(row["id"]), 0))
+                    if result:
+                        camp_repo.update_campaign_copy(row["id"], result[0], result[1])
+                        refreshed_ids.add(str(row["id"]))
+                        copy_refreshed += 1
+                        log_repo.log_action("COPY", f"Conversion rewrite applied to '{row['headline']}' "
+                                                    f"({row['views']} views, {row['clicks']} clicks -> fresh copy).")
+                except Exception as row_exc:
+                    # One bad page never aborts the refresh (or the grind).
+                    log_repo.log_action("COPY", f"Copy refresh skipped for a page: {type(row_exc).__name__}.")
+            if copy_refreshed:
+                log_repo.log_action("COPY", f"Daily copy refresh: {copy_refreshed} page(s) rewritten (limit {limit}).")
+        except Exception as exc:
+            log_repo.log_action("COPY", f"Copy refresh step failed (non-fatal): {type(exc).__name__}.")
 
     # 5. Milestone celebrations (each threshold celebrated once per stream)
     week_ago = now.date() - timedelta(days=7)

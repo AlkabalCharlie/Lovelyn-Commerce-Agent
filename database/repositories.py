@@ -303,14 +303,14 @@ class CampaignRepository:
     def get_traffic_stats(self) -> List[dict]:
         with engine.connect() as connection:
             rows = connection.execute(text(
-                "SELECT c.id, c.headline, c.status, c.product_id, c.agent_flag, c.created_at, c.revenue_cents, "
+                "SELECT c.id, c.headline, c.body, c.status, c.product_id, c.agent_flag, c.created_at, c.revenue_cents, "
                 "p.name AS product_name, p.merchant, p.description, p.price, "
                 "COUNT(*) FILTER (WHERE e.event_type = 'view') AS views, "
                 "COUNT(*) FILTER (WHERE e.event_type = 'click') AS clicks "
                 "FROM campaigns c "
                 "JOIN products p ON p.id = c.product_id "
                 "LEFT JOIN page_events e ON e.campaign_id = c.id "
-                "GROUP BY c.id, c.headline, c.status, c.product_id, c.agent_flag, c.created_at, c.revenue_cents, p.name, p.merchant, p.description, p.price "
+                "GROUP BY c.id, c.headline, c.body, c.status, c.product_id, c.agent_flag, c.created_at, c.revenue_cents, p.name, p.merchant, p.description, p.price "
                 "ORDER BY views DESC")).mappings().all()
         return [dict(r) for r in rows]
 
