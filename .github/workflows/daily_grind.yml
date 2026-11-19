@@ -11,6 +11,20 @@ permissions:
 jobs:
   run-agent:
     runs-on: ubuntu-latest
+    # Job-level env: EVERY step (including the import-time checks and pytest)
+    # gets the Supabase settings. database/connection.py raises at import time
+    # when they are missing, so earlier steps failed without this.
+    env:
+      SUPABASE_USERNAME: ${{ secrets.SUPABASE_USERNAME }}
+      SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
+      SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+      LOVELYN_SSL_VERIFY: ${{ secrets.LOVELYN_SSL_VERIFY || 'true' }}
+      # AI copy layer (Groq or any OpenAI-compatible endpoint).
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      COPY_AI_BASE_URL: ${{ secrets.COPY_AI_BASE_URL }}
+      COPY_AI_MODEL: ${{ secrets.COPY_AI_MODEL }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,13 +52,6 @@ jobs:
         run: python -m pytest tests -q
 
       - name: Run Autonomous Agent
-        env:
-          SUPABASE_USERNAME: ${{ secrets.SUPABASE_USERNAME }}
-          SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
-          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
-          LOVELYN_SSL_VERIFY: ${{ secrets.LOVELYN_SSL_VERIFY }}
         run: python run_agent.py
 
       # P1-11: never commit a Pages deploy that would remove the public site.
