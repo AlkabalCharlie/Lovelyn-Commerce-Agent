@@ -4,9 +4,10 @@ import requests
 from config.settings import DEVTO_API_KEY
 
 
-def publish_to_devto(headline: str, body: str, campaign_url: str) -> bool:
+def publish_to_devto(headline: str, body: str, campaign_url: str) -> str | None:
+    """Returns the published article URL on success, None on failure."""
     if not DEVTO_API_KEY:
-        return False
+        return None
     try:
         r = requests.post(
             "https://dev.to/api/articles",
@@ -22,9 +23,10 @@ def publish_to_devto(headline: str, body: str, campaign_url: str) -> bool:
             timeout=20,
         )
         if r.status_code == 201:
-            return True
+            # Dev.to returns the live article URL in Location on create.
+            return r.headers.get("Location") or r.json().get("url") or ""
         print(f"Dev.to refused: HTTP {r.status_code} {r.text[:300]}")
-        return False
+        return None
     except Exception as e:
         print(f"Dev.to error: {e}")
-        return False
+        return None

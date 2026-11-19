@@ -145,7 +145,7 @@ def render_campaign_page(camp: dict, anon_key: str, rest_url: str, base_url: str
     affiliate = (camp.get("affiliate_url") or "").strip()
     # Owned products are OUR products: the honest disclosure differs.
     dest = affiliate or camp["product_url"]
-    is_owned = "gumroad.com" in dest or "payhip.com" in dest
+    is_owned = "gumroad.com" in dest or "payhip.com" in dest or "gum.co" in dest
     disclosure = (
         '<p class="disclosure">Disclosure: this is our own product. If you buy '
         "through this page we receive the proceeds at no extra cost to you. "

@@ -9,6 +9,7 @@ import json
 
 import streamlit as st
 
+from database.connection import engine
 from database.repositories import CampaignRepository, LeadRepository
 
 st.title("Leads & Publishing Queue")
@@ -32,7 +33,7 @@ with tab1:
 
 with tab2:
     repo = CampaignRepository()
-    with repo.engine.connect() as conn:  # read-only queue listing
+    with engine.connect() as conn:  # read-only queue listing
         from sqlalchemy import text
         rows = conn.execute(text(
             "SELECT q.id, q.channel, q.title, q.format, q.status, "

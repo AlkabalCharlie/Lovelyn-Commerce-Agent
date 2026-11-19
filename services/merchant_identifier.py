@@ -8,6 +8,12 @@ def identify_merchant(url: str) -> str:
         return "Etsy"
     if "jvzoo.com" in url_lower:
         return "JVZoo"
+    if "jumia.com" in url_lower or "jumia." in url_lower:
+        return "Jumia"
+    if "tradingview.com" in url_lower or "tradingview." in url_lower:
+        return "TradingView"
+    if "gumroad.com" in url_lower or "gum.co" in url_lower:
+        return "Gumroad"
     if "ebay.com" in url_lower:
         return "eBay"
     if "amazon.com" in url_lower or "amzn.to" in url_lower:

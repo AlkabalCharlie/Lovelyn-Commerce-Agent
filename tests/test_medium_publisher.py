@@ -19,7 +19,7 @@ def test_headline_truncated_to_medium_limit():
 
 def test_publish_skips_when_key_missing(monkeypatch):
     monkeypatch.setattr("services.medium_publisher.MEDIUM_API_KEY", None)
-    assert publish_to_medium("T", "B", "https://example.com/x.html") is False
+    assert publish_to_medium("T", "B", "https://example.com/x.html") is None
 
 
 def test_publish_returns_false_on_http_error(monkeypatch):
@@ -38,4 +38,4 @@ def test_publish_returns_false_on_http_error(monkeypatch):
             return FakeResp()
 
     monkeypatch.setattr("services.medium_publisher.requests", FakeRequests)
-    assert publish_to_medium("T", "B", "https://example.com/x.html") is False
+    assert publish_to_medium("T", "B", "https://example.com/x.html") is None

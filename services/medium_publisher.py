@@ -18,9 +18,10 @@ def build_medium_article(headline: str, body: str, campaign_url: str) -> dict:
     }
 
 
-def publish_to_medium(headline: str, body: str, campaign_url: str) -> bool:
+def publish_to_medium(headline: str, body: str, campaign_url: str) -> str | None:
+    """Returns the published post URL on success, None on failure."""
     if not MEDIUM_API_KEY:
-        return False
+        return None
     try:
         # Medium's API needs the author id: fetch it with the same token first.
         me = requests.get(
@@ -30,7 +31,7 @@ def publish_to_medium(headline: str, body: str, campaign_url: str) -> bool:
         )
         if me.status_code != 200:
             print(f"Medium refused /me: HTTP {me.status_code} {me.text[:300]}")
-            return False
+            return None
         author_id = me.json()["data"]["id"]
         r = requests.post(
             f"https://api.medium.com/v1/users/{author_id}/posts",
@@ -39,9 +40,9 @@ def publish_to_medium(headline: str, body: str, campaign_url: str) -> bool:
             timeout=20,
         )
         if r.status_code in (200, 201):
-            return True
+            return (r.json().get("data") or {}).get("url") or ""
         print(f"Medium refused: HTTP {r.status_code} {r.text[:300]}")
-        return False
+        return None
     except Exception as e:
         print(f"Medium error: {e}")
-        return False
+        return None

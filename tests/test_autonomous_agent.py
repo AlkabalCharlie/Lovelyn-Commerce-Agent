@@ -43,7 +43,7 @@ def test_daily_grind_promotes_only_db_authorized_campaigns(monkeypatch):
                 {"id": held_id, "headline": "Held", "body": "Held"},
             ]
 
-        def mark_pushed(self, channel, campaign_id):
+        def mark_pushed(self, channel, campaign_id, publication_url=None):
             published_channels.append((channel, campaign_id))
 
         def get_traffic_stats(self):
@@ -81,9 +81,9 @@ def test_daily_grind_promotes_only_db_authorized_campaigns(monkeypatch):
     monkeypatch.setattr(autonomous_agent, "BLUESKY_HANDLE", "configured")
     monkeypatch.setattr(autonomous_agent, "BLUESKY_APP_PASSWORD", "configured")
     monkeypatch.setattr(autonomous_agent, "MEDIUM_API_KEY", "configured")
-    monkeypatch.setattr(autonomous_agent, "publish_to_devto", lambda *args: True)
+    monkeypatch.setattr(autonomous_agent, "publish_to_devto", lambda *args: "https://dev.to/x")
     monkeypatch.setattr(autonomous_agent, "publish_to_bluesky", lambda *args: True)
-    monkeypatch.setattr(autonomous_agent, "publish_to_medium", lambda *args: True)
+    monkeypatch.setattr(autonomous_agent, "publish_to_medium", lambda *args: "https://medium.com/x")
     monkeypatch.setattr(autonomous_agent, "scout_from_products", lambda products: [])
     monkeypatch.setattr(autonomous_agent, "build_site", lambda: 4)
 

@@ -47,6 +47,14 @@ jobs:
           LOVELYN_SSL_VERIFY: ${{ secrets.LOVELYN_SSL_VERIFY }}
         run: python run_agent.py
 
+      # P1-11: never commit a Pages deploy that would remove the public site.
+      - name: Verify site was built
+        run: |
+          if [ ! -f docs/index.html ]; then
+            echo "::error::docs/index.html missing - the agent failed to build the public site"
+            exit 1
+          fi
+
       - name: Commit rebuilt traffic site
         run: |
           git config user.name "lovelyn-agent"

@@ -150,8 +150,9 @@ def run_daily_grind():
         ]
         for camp in launch_campaigns[:MAX_POSTS_PER_CHANNEL_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
-            if publish_to_devto(camp["headline"], camp["body"], url):
-                camp_repo.mark_pushed("devto", camp["id"])
+            pub_url = publish_to_devto(camp["headline"], camp["body"], url)
+            if pub_url is not None:
+                camp_repo.mark_pushed("devto", camp["id"], pub_url or None)
                 pushed["devto"] += 1
     if not (BLUESKY_HANDLE and BLUESKY_APP_PASSWORD):
         log_repo.log_action("CONFIG", "Bluesky credentials missing - Bluesky distribution skipped.")
@@ -163,7 +164,7 @@ def run_daily_grind():
         for camp in launch_campaigns[:MAX_POSTS_PER_CHANNEL_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
             if publish_to_bluesky(BLUESKY_HANDLE, BLUESKY_APP_PASSWORD, camp["headline"], url):
-                camp_repo.mark_pushed("bluesky", camp["id"])
+                camp_repo.mark_pushed("bluesky", camp["id"], url)  # bluesky API returns no per-post URL; the campaign link is in the post
                 pushed["bluesky"] += 1
     if not MEDIUM_API_KEY:
         log_repo.log_action("CONFIG", "MEDIUM_API_KEY missing or parked - Medium distribution skipped.")
@@ -174,8 +175,9 @@ def run_daily_grind():
         ]
         for camp in launch_campaigns[:MAX_MEDIUM_POSTS_PER_RUN]:
             url = f"{SITE_BASE_URL}campaign-{camp['id']}.html"
-            if publish_to_medium(camp["headline"], camp["body"], url):
-                camp_repo.mark_pushed("medium", camp["id"])
+            pub_url = publish_to_medium(camp["headline"], camp["body"], url)
+            if pub_url is not None:
+                camp_repo.mark_pushed("medium", camp["id"], pub_url or None)
                 pushed["medium"] += 1
     for channel, count in pushed.items():
         if count:
@@ -381,9 +383,20 @@ def run_daily_grind():
             if note not in celebrated:
                 log_repo.log_action("MILESTONE", note)
 
-    # 6. Rebuild the public storefront
+    # 6. Rebuild the public storefront, then ping search engines so the
+    #    fresh pages are actually discovered (P1-11). Ping failures are
+    #    non-fatal and never block the grind.
     pages = build_site()
     log_repo.log_action("SITE", f"Rebuilt public traffic site with {pages} live page(s).")
+    try:
+        from services.index_ping import ping_sitemap_urls
+        if pages:
+            ping_sitemap_urls(["index.html"] + [f"campaign-{c['id']}.html" for c in camp_repo.list_published_campaigns()])
+            log_repo.log_action("SITE", "Search-engine ping (IndexNow) submitted.")
+        else:
+            log_repo.log_action("SITE", "No pages built - search-engine ping skipped.")
+    except Exception as exc:
+        log_repo.log_action("SITE", f"Index ping skipped: {type(exc).__name__}.")
 
     summary = (f"Daily grind complete. Enriched: {enriched}, Generated: {generated}, "
                f"Approved: {approved}, Published: {published}, "

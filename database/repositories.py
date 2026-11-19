@@ -15,6 +15,13 @@ _DISTRIBUTION_COLUMNS = {
     "medium": "medium_pushed",
 }
 
+# P1-8: companion column that stores WHERE each channel published the item.
+_PUBLICATION_URL_COLUMNS = {
+    "devto": "devto_publication_url",
+    "bluesky": "bluesky_publication_url",
+    "medium": "medium_publication_url",
+}
+
 VALID_LEAD_STATUSES = ("new", "contacted", "skipped")
 VALID_HEALTH_STATUSES = ("connected", "authorization_expired", "configuration_missing",
                          "quota_exceeded", "failed", "awaiting_verification")
@@ -270,11 +277,28 @@ class CampaignRepository:
                 f"AND c.{col} = FALSE ORDER BY c.created_at ASC")).mappings().all()
         return [dict(r) for r in rows]
 
-    def mark_pushed(self, channel: str, campaign_id: str) -> bool:
+    def mark_pushed(self, channel: str, campaign_id: str, publication_url: str = None) -> bool:
+        """Marks a channel pushed, optionally recording the live publication
+        URL (P1-8). Falls back gracefully when the publication-url migration
+        has not been applied yet."""
         col = _DISTRIBUTION_COLUMNS[channel]
-        with engine.begin() as connection:
-            result = connection.execute(text(f"UPDATE campaigns SET {col} = TRUE WHERE id = :id"), {"id": campaign_id})
-            return result.rowcount == 1
+        url_col = _PUBLICATION_URL_COLUMNS.get(channel)
+        sets = f"{col} = TRUE"
+        if url_col and publication_url:
+            sets += f", {url_col} = :u"
+        try:
+            with engine.begin() as connection:
+                result = connection.execute(
+                    text(f"UPDATE campaigns SET {sets} WHERE id = :id"),
+                    {"id": campaign_id, "u": publication_url})
+                return result.rowcount == 1
+        except Exception:
+            # Column missing (migration pending): still record the push flag.
+            with engine.begin() as connection:
+                result = connection.execute(
+                    text(f"UPDATE campaigns SET {col} = TRUE WHERE id = :id"),
+                    {"id": campaign_id})
+                return result.rowcount == 1
 
     def get_traffic_stats(self) -> List[dict]:
         with engine.connect() as connection:
