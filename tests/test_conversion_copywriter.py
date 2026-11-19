@@ -75,19 +75,8 @@ def test_rewrite_accepts_fact_clean_copy(monkeypatch):
     assert result[1].startswith("## ")
 
 
-def test_rewrite_never_touches_earning_pages():
-    """Revenue > 0 -> no rewrite, regardless of API key."""
+def test_rewrite_never_touches_earning_pages(monkeypatch):
+    """Revenue > 0 -> no rewrite, even with a key configured."""
     import config.settings as settings
-    settings.OPENAI_API_KEY  # existence check only
-    assert rewrite_for_conversion("H", "B" * 60, {"p": "x"}, 2, 150) is None \
-        if not settings.OPENAI_API_KEY else _earning_guard()
-
-
-def _earning_guard():
-    # Direct budget guard test with key patched in.
-    import config.settings as settings
-    settings.OPENAI_API_KEY = "k"
-    try:
-        assert rewrite_for_conversion("H", "B" * 60, {"p": "x"}, 2, 150) is None
-    finally:
-        settings.OPENAI_API_KEY = None
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "k")
+    assert rewrite_for_conversion("H", "B" * 60, {"p": "x"}, 2, 150) is None
