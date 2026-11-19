@@ -62,7 +62,7 @@ def rewrite_for_conversion(headline: str, body: str, facts: dict,
     current copy (any failure, budget refusal, or hallucinated number)."""
     import os
 
-    from config.settings import OPENAI_API_KEY, COPY_AI_MODEL
+    from config.settings import OPENAI_API_KEY, COPY_AI_MODEL, COPY_AI_BASE_URL
 
     if not OPENAI_API_KEY:
         return None
@@ -75,7 +75,7 @@ def rewrite_for_conversion(headline: str, body: str, facts: dict,
     try:
         import requests
         resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
+            f"{COPY_AI_BASE_URL}/chat/completions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
             json={
                 "model": COPY_AI_MODEL,

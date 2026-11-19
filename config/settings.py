@@ -40,7 +40,12 @@ BLUESKY_APP_PASSWORD = _get_setting("BLUESKY_APP_PASSWORD")
 MEDIUM_API_KEY = _get_setting("MEDIUM_API_KEY")
 
 # Optional LLM copy-polish. Unset = template copy exactly as before.
+# Any OpenAI-COMPATIBLE endpoint works - not just OpenAI:
+#   COPY_AI_BASE_URL=https://api.groq.com/openai/v1   (free tier, Llama - open weights)
+#   COPY_AI_BASE_URL=https://api.openai.com/v1        (paid)
+#   COPY_AI_BASE_URL=http://localhost:11434/v1        (Ollama, fully local & free)
 OPENAI_API_KEY = _get_setting("OPENAI_API_KEY")
+COPY_AI_BASE_URL = _get_setting("COPY_AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 COPY_AI_MODEL = _get_setting("COPY_AI_MODEL", "gpt-4o-mini")
 
 PAYHIP_WEBHOOK_TOKEN = _get_setting("PAYHIP_WEBHOOK_TOKEN")

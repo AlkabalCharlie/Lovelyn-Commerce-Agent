@@ -16,7 +16,7 @@ import re
 
 import requests
 
-from config.settings import COPY_AI_MODEL, OPENAI_API_KEY
+from config.settings import COPY_AI_MODEL, COPY_AI_BASE_URL, OPENAI_API_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def polish_headline(headline: str, facts: dict) -> str:
         return headline
     try:
         resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
+            f"{COPY_AI_BASE_URL}/chat/completions",
             headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
             json={
                 "model": COPY_AI_MODEL,
