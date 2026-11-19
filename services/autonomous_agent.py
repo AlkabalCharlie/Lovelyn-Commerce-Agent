@@ -12,6 +12,7 @@ from config.settings import (
     BLUESKY_HANDLE,
     DEVTO_API_KEY,
     MEDIUM_API_KEY,
+    OPENAI_API_KEY,
     OWNED_PRODUCT_URL,
     SITE_BASE_URL,
 )
@@ -372,6 +373,37 @@ def run_daily_grind():
             camp_repo.update_campaign_status(row["id"], "archived")
             killed += 1
             log_repo.log_action("KILL", f"'{row['headline']}': {row['views']} views, 0 clicks after {age_days} days -> archived.")
+
+    # 4.5 Daily conversion-copy refresh: spend a small AI budget rewriting
+    # LIVE campaign bodies that get views but no clicks (copy is the leak),
+    # never touching pages that already earn. Fact-locked: a hallucinated
+    # number rejects the rewrite and the page keeps its current copy.
+    copy_refreshed = 0
+    if OPENAI_API_KEY:
+        from services.conversion_copywriter import rewrite_for_conversion, should_refresh
+        refreshed_ids = set()
+        limit = max(1, int(os.getenv("COPY_REFRESH_DAILY_LIMIT", "3") or 3))
+        # Prefer weakest-first: views-but-no-clicks, oldest first.
+        candidates = sorted(
+            [r for r in camp_repo.get_traffic_stats()
+             if _authorized(camp_repo, r["id"]) and should_refresh(r, refreshed_ids)
+             and _verified_rev.get(str(r["id"]), 0) == 0],
+            key=lambda r: (-(r.get("views") or 0), r.get("created_at") or now))
+        for row in candidates[:limit]:
+            facts = {"product": row["product_name"], "merchant": row["merchant"],
+                     "description": row["description"] or "",
+                     "price": row["price"] if row["price"] is not None else ""}
+            result = rewrite_for_conversion(row["headline"], row["body"], facts,
+                                            row["clicks"],
+                                            _verified_rev.get(str(row["id"]), 0))
+            if result:
+                camp_repo.update_campaign_copy(row["id"], result[0], result[1])
+                refreshed_ids.add(str(row["id"]))
+                copy_refreshed += 1
+                log_repo.log_action("COPY", f"Conversion rewrite applied to '{row['headline']}' "
+                                            f"({row['views']} views, {row['clicks']} clicks -> fresh copy).")
+        if copy_refreshed:
+            log_repo.log_action("COPY", f"Daily copy refresh: {copy_refreshed} page(s) rewritten (limit {limit}).")
 
     # 5. Milestone celebrations (each threshold celebrated once per stream)
     week_ago = now.date() - timedelta(days=7)
