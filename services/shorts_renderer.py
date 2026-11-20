@@ -24,6 +24,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from services.shorts_visuals import Scene, draw_scene, scene_for_narration
+
 W, H = 1080, 1920  # vertical 9:16
 FPS = 30
 FONT_SIZE_TITLE = 92
@@ -66,6 +68,7 @@ def _wrap(draw, text, font, max_width):
 
 
 def _draw_frame(title, caption, highlight_index=0, progress=0.0) -> Image.Image:
+    """Legacy text frame - still used for caption overlay compositing."""
     img = Image.new("RGB", (W, H), _BG)
     d = ImageDraw.Draw(img)
     # Accent bar whose width tracks narration progress (animated, per frame).
@@ -93,7 +96,23 @@ def _draw_frame(title, caption, highlight_index=0, progress=0.0) -> Image.Image:
 
 
 def _narration_wav(text: str, out_path: str) -> float:
-    """Local free TTS. Returns duration seconds (measured after render)."""
+    """Neural TTS (edge-tts, free Microsoft neural voices). Falls back to
+    Windows SAPI ONLY if edge-tts is unreachable - and logs loudly so the
+    robotic voice is never a silent downgrade."""
+    import asyncio
+
+    async def _synth():
+        import edge_tts
+        voice = os.getenv("SHORTS_TTS_VOICE", "en-US-AndrewMultilingualNeural")
+        c = edge_tts.Communicate(text, voice, rate="+4%")
+        await c.save(out_path)
+
+    try:
+        asyncio.run(_synth())
+        return _wav_duration(out_path)
+    except Exception as exc:
+        print(f"WARNING: edge-tts failed ({type(exc).__name__}) - falling "
+              f"back to SAPI. This is a DOWNGRADE, not a silent fallback.")
     import pyttsx3
     engine = pyttsx3.init()
     engine.setProperty("rate", 168)
@@ -108,12 +127,49 @@ def _wav_duration(path: str) -> float:
         return w.getnframes() / float(w.getframerate() or 1)
 
 
-def render_short(package: dict, out_path: str) -> str | None:
-    """Render one Shorts MP4 from a content package. Returns out_path or None.
+def _compose_frame(scene: Scene, caption: str, global_idx: int,
+                   fps: int, title: str) -> Image.Image:
+    """Visual scene + caption overlay (subtitles preserved, composited ON TOP
+    of the illustrated scene)."""
+    img = draw_scene(scene, global_idx, fps)
+    d = ImageDraw.Draw(img)
+    # Caption block (identical placement/style to the working subtitle system)
+    cap_font = _font(FONT_SIZE_CAPTION)
+    cap_lines = _wrap(d, caption or "", cap_font, W - 200)[-6:]
+    cy = H - SAFE_BOTTOM + 60  # below illustration ground, inside safe area
+    for line in cap_lines:
+        bbox = d.textbbox((0, 0), line, font=cap_font)
+        lw = bbox[2] - bbox[0]
+        d.rounded_rectangle([(W - lw) // 2 - 22, cy - 10,
+                             (W + lw) // 2 + 22, cy + FONT_SIZE_CAPTION + 6],
+                            radius=16, fill=(15, 15, 22))
+        d.text(((W - lw) // 2, cy), line, font=cap_font, fill=_TEXT)
+        cy += FONT_SIZE_CAPTION + 12
+    # Scene label (top, small) for context continuity
+    if title:
+        tfont = _font(44)
+        tl = _wrap(d, title, tfont, W - 200)[:2]
+        ty = SAFE_TOP - 120
+        for line in tl:
+            bbox = d.textbbox((0, 0), line, font=tfont)
+            lw = bbox[2] - bbox[0]
+            d.rounded_rectangle([(W - lw) // 2 - 18, ty - 8,
+                                 (W + lw) // 2 + 18, ty + 56],
+                                radius=12, fill=(15, 15, 22))
+            d.text(((W - lw) // 2, ty), line, font=tfont, fill=_DIM)
+            ty += 60
+    return img
 
-    Requires package keys: title, hook, scenes (each with narration +
-    on_screen), disclosure. Durations come from ACTUAL narration audio so
-    captions stay synchronized."""
+
+def _crossfade(a: Image.Image, b: Image.Image, f: float) -> Image.Image:
+    return Image.blend(a, b, f)
+
+
+def render_short(package: dict, out_path: str) -> str | None:
+    """Render one Shorts MP4. VISUAL UPGRADE: each scene gets a meaning-matched
+    illustration (characters, motion, transitions from shorts_visuals) with
+    the working caption/subtitle system composited on top. Durations come
+    from ACTUAL narration audio so captions stay synchronized."""
     if ffmpeg_missing():
         raise RuntimeError("ffmpeg not found on PATH")
     scenes = package.get("scenes") or []
@@ -123,6 +179,8 @@ def render_short(package: dict, out_path: str) -> str | None:
     try:
         seg_files, total = [], 0.0
         title = package.get("hook") or package.get("title") or "Short"
+        FADE_FRAMES = FPS // 3  # ~0.33s cross-fade between scenes
+        prev_last = None
         for i, scene in enumerate(scenes):
             narration = (scene.get("narration") or scene.get("on_screen") or "").strip()
             if not narration:
@@ -131,15 +189,28 @@ def render_short(package: dict, out_path: str) -> str | None:
             dur = _narration_wav(narration, wav)
             if dur <= 0.2:
                 continue
-            # Animated frames: accent bar progresses through the scene.
+            vs = scene_for_narration(narration,
+                                     scene.get("on_screen") or narration)
             frame_dir = os.path.join(work, f"f{i}")
             os.makedirs(frame_dir, exist_ok=True)
             n_frames = max(int(dur * FPS), 1)
             for f in range(n_frames):
-                frame = _draw_frame(title if i == 0 else "",
-                                    scene.get("on_screen") or narration,
-                                    progress=(f + 1) / n_frames)
+                vs.t = (f + 1) / n_frames
+                frame = _compose_frame(vs, vs.caption, global_idx=f,
+                                       fps=FPS, title=title if i == 0 else "")
+                # Cross-fade from the previous scene's last frame
+                if prev_last is not None and f < FADE_FRAMES:
+                    frame = _crossfade(prev_last, frame, (f + 1) / FADE_FRAMES)
                 frame.save(os.path.join(frame_dir, f"f{f:05d}.png"))
+            if prev_last is None:
+                # Fade-in from black for the opening scene
+                black = Image.new("RGB", (W, H), (0, 0, 0))
+                for f in range(FADE_FRAMES):
+                    p = os.path.join(frame_dir, f"f{f:05d}.png")
+                    Image.blend(black, Image.open(p), (f + 1) / FADE_FRAMES
+                                ).save(p)
+            prev_last = Image.open(os.path.join(frame_dir,
+                                                f"f{n_frames - 1:05d}.png"))
             seg = os.path.join(work, f"s{i}.mp4")
             subprocess.run(
                 ["ffmpeg", "-y", "-loglevel", "error",
