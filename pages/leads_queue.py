@@ -10,13 +10,20 @@ import json
 import streamlit as st
 
 from database.connection import engine
+from database.connection import engine
 from database.repositories import CampaignRepository, LeadRepository
+from services.publishing_queue import ensure_shorts_columns
 
 st.title("Leads & Publishing Queue")
 st.caption("Buyer-intent opportunities (read-only — Reddit stays reply-by-hand) "
            "and owner-publishing packages for channels without credentials.")
 
 tab1, tab2 = st.tabs(["Qualified Leads", "Publishing Queue"])
+
+try:
+    ensure_shorts_columns()  # additive; makes shorts states visible pre-migration
+except Exception:
+    pass
 
 with tab1:
     leads = LeadRepository().list_leads()
@@ -37,7 +44,8 @@ with tab2:
         from sqlalchemy import text
         rows = conn.execute(text(
             "SELECT q.id, q.channel, q.title, q.format, q.status, "
-            "q.publication_url, q.package, q.campaign_id, "
+            "q.publication_url, q.package, q.campaign_id, q.video_path, "
+            "q.youtube_video_id, q.error_detail, q.generated_at, "
             "c.headline AS campaign_headline "
             "FROM publishing_queue q LEFT JOIN campaigns c ON c.id = q.campaign_id "
             "ORDER BY q.created_at DESC")).mappings().all()
@@ -53,9 +61,17 @@ with tab2:
         with st.expander(label):
             st.markdown(f"**Status:** `{row['status']}` · **Origin:** `{origin}` "
                         f"· **Campaign:** {row.get('campaign_headline') or '—'}")
-            if row["publication_url"]:
+            # Shorts pipeline visibility: distinct states, never conflated.
+            if row.get("youtube_video_id") and row["publication_url"]:
+                st.success(f"🎥 **Published on YouTube:** {row['publication_url']}")
+            elif row.get("video_path"):
+                st.info(f"🎬 **Video rendered** (`{row['video_path']}`) — "
+                        f"awaiting upload (credentials or visibility setting).")
+            if row.get("error_detail"):
+                st.error(f"**Needs attention:** {row['error_detail']}")
+            if row["publication_url"] and not row.get("youtube_video_id"):
                 st.markdown(f"**Published at:** {row['publication_url']}")
-            else:
+            elif not row["publication_url"] and not row.get("video_path"):
                 st.warning("Queued — NOT published. Publish manually, then "
                            "record the URL here.")
             if opp:

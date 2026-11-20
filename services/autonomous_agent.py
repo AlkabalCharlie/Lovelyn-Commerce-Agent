@@ -30,6 +30,7 @@ from services.bluesky_publisher import publish_to_bluesky
 from services.campaign_generator import generate_campaign
 from services.devto_publisher import publish_to_devto
 from services.medium_publisher import publish_to_medium
+from services import youtube_upload
 from services.optimizer import (
     MAX_WINNER_VARIANTS,
     WINNER_VARIANT_ANGLES,
@@ -412,6 +413,69 @@ def run_daily_grind():
         except Exception as exc:
             log_repo.log_action("COPY", f"Copy refresh step failed (non-fatal): {type(exc).__name__}.")
 
+    # 4.7 YouTube Shorts pipeline (max 2/day, non-fatal): render one queued
+    # script package into a real MP4, then upload any rendered-but-unuploaded
+    # one whose campaign is still authorized. Missing ffmpeg or YouTube
+    # credentials NEVER blocks other channels - exact reason is logged.
+    rendered = uploaded_count = 0
+    try:
+        from services.publishing_queue import (
+            claim_next_rendered_for_upload, claim_next_short_for_render,
+            ensure_shorts_columns, mark_rendered, mark_uploaded, set_status)
+        from services.shorts_renderer import ffmpeg_missing, render_short
+        ensure_shorts_columns()
+        MAX_SHORTS_PER_RUN = 2
+        if ffmpeg_missing():
+            log_repo.log_action("SHORTS", "ffmpeg missing on runner - rendering skipped "
+                                          "(install ffmpeg; queue unchanged).")
+        else:
+            for _ in range(MAX_SHORTS_PER_RUN):
+                item = claim_next_short_for_render()
+                if not item:
+                    break
+                pkg = item.get("package") or {}
+                if not _authorized(camp_repo, str(item.get("campaign_id") or "")):
+                    set_status(item["id"], "skipped",
+                               error="campaign no longer promotion-authorized")
+                    continue
+                out = os.path.join("media", "shorts", f"short-{item['id'][:8]}.mp4")
+                set_status(item["id"], "generating")
+                path = render_short(pkg, out)
+                if path:
+                    mark_rendered(item["id"], path)
+                    rendered += 1
+                    log_repo.log_action("SHORTS", f"Rendered MP4 for '{item['title'][:60]}'.")
+                else:
+                    set_status(item["id"], "failed", error="render returned no file")
+        if youtube_upload.credentials_ready():
+            for _ in range(MAX_SHORTS_PER_RUN):
+                item = claim_next_rendered_for_upload()
+                if not item:
+                    break
+                if not _authorized(camp_repo, str(item.get("campaign_id") or "")):
+                    set_status(item["id"], "skipped",
+                               error="campaign no longer promotion-authorized")
+                    continue
+                pkg = item.get("package") or {}
+                set_status(item["id"], "uploading")
+                ok, vid_or_reason = youtube_upload.upload_short(
+                    item["video_path"],
+                    (pkg.get("title") or item["title"])[:100],
+                    pkg.get("description") or "",
+                    pkg.get("tags") or [])
+                if ok and "/shorts/" in vid_or_reason:
+                    mark_uploaded(item["id"], vid_or_reason.rsplit("/", 1)[-1], vid_or_reason)
+                    uploaded_count += 1
+                    log_repo.log_action("SHORTS", f"Published Short: {vid_or_reason}")
+                else:
+                    set_status(item["id"], "rendered", error=vid_or_reason)
+                    log_repo.log_action("SHORTS", f"Upload not completed: {vid_or_reason[:160]}")
+        else:
+            log_repo.log_action("SHORTS", "YouTube credentials missing - rendered videos "
+                                          "wait in queue (owner setup: services/youtube_upload.py docstring).")
+    except Exception as exc:
+        log_repo.log_action("SHORTS", f"Shorts pipeline step failed (non-fatal): {type(exc).__name__}.")
+
     # 5. Milestone celebrations (each threshold celebrated once per stream)
     week_ago = now.date() - timedelta(days=7)
     totals = fin_repo.sum_by_stream_since(week_ago)
@@ -442,6 +506,7 @@ def run_daily_grind():
                f"Dev.to: {pushed['devto']}, Bluesky: {pushed['bluesky']}, Medium: {pushed['medium']}, "
                f"New leads: {new_leads}, Queued packages: {packages_queued}, "
                f"Winners scaled: {winners}, Revived: {revived}, Killed: {killed}, "
-               f"Rewritten: {rewritten}, Site pages: {pages}.")
+               f"Shorts rendered: {rendered}, Shorts uploaded: {uploaded_count}, "
+               f"Site pages: {pages}.")
     log_repo.log_action("COMPLETE", summary)
     return summary
