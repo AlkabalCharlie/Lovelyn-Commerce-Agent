@@ -25,3 +25,6 @@ Thumbs.db
 # Supabase local state and per-project secret env (CLI auth tokens, service keys)
 supabase/.temp/
 .env.supabase
+
+# YouTube OAuth client secret (never commit)
+client_secret.json
