@@ -10,18 +10,27 @@ def test_uses_real_price_and_description():
     assert "snowball payoff" in r["body"]
 
 
-def test_falls_back_without_facts():
+def test_falls_back_without_facts(monkeypatch):
+    """Template headline contains the product name. The AI polisher (live
+    when a key is configured, e.g. Groq in this environment) can rephrase
+    the headline, so pin the key OFF for this deterministic-template test."""
+    from services import copy_polisher as cp
+    monkeypatch.setattr(cp, "OPENAI_API_KEY", None)
     r = generate_campaign("Mystery Item", "Etsy", "Review")
     assert "Mystery Item" in r["headline"]
     assert "not listed" in r["body"]
 
 
-def test_comparison_angle_mentions_merchant():
+def test_comparison_angle_mentions_merchant(monkeypatch):
+    from services import copy_polisher as cp
+    monkeypatch.setattr(cp, "OPENAI_API_KEY", None)
     r = generate_campaign("Vest", "Etsy", "Comparison", price="$45")
     assert "Etsy" in r["body"]
 
 
-def test_promo_angle_type():
+def test_promo_angle_type(monkeypatch):
+    from services import copy_polisher as cp
+    monkeypatch.setattr(cp, "OPENAI_API_KEY", None)
     r = generate_campaign("Vest", "Etsy", "Promo")
     assert r["type"] == "Direct Promotion"
 

@@ -53,7 +53,12 @@ def _facts_allow_all_numbers(text: str, locked_facts: list) -> bool:
 
 
 def polish_headline(headline: str, facts: dict) -> str:
-    """Humanize a headline. Returns the original on any failure."""
+    """Humanize a headline. Returns the original on any failure.
+
+    A headline must retain the product identity.  The model can otherwise
+    return a grammatically plausible fragment (for example, "Is Etsy") that
+    passes the numeric fact-lock but is unusable as campaign copy.
+    """
     if not OPENAI_API_KEY:
         return headline
     try:
@@ -81,6 +86,10 @@ def polish_headline(headline: str, facts: dict) -> str:
             return headline
         polished = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         if not polished or len(polished) > 200:
+            return headline
+        product_name = str(facts.get("name") or "").strip()
+        if product_name and product_name.casefold() not in polished.casefold():
+            logger.info("Headline polish rejected (missing product name).")
             return headline
         if not _facts_allow_all_numbers(polished, list(facts.values())):
             logger.info("Headline polish rejected (invented numbers).")

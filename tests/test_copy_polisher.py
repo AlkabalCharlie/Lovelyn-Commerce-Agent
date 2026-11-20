@@ -60,6 +60,20 @@ def test_clean_polish_accepted(monkeypatch):
     assert "$7" in result        # locked price preserved
 
 
+def test_headline_missing_product_name_falls_back_to_template(monkeypatch):
+    monkeypatch.setattr(cp, "OPENAI_API_KEY", "test-key")
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Is Etsy worth it?"}}]}
+
+    monkeypatch.setattr(cp.requests, "post", lambda *a, **k: FakeResp())
+    headline = "Mystery Item on Etsy: is it worth buying?"
+    assert cp.polish_headline(headline, {"name": "Mystery Item", "merchant": "Etsy"}) == headline
+
+
 def test_http_error_falls_back_to_template(monkeypatch):
     monkeypatch.setattr(cp, "OPENAI_API_KEY", "test-key")
 
