@@ -132,31 +132,44 @@ class BuyerProductMatchRepository:
                price_cents: int = None, commission_cents: int = None,
                commission_note: str = None, match_score: int,
                match_reasoning: str, missing_info: list = None,
-               is_existing_campaign: bool = False) -> bool:
-        """One candidate per (need, product_url). Returns True when NEW."""
+               is_existing_campaign: bool = False,
+               classification: str = "weak_match",
+               gate_explanation: str = None,
+               gate_reasons: dict = None) -> bool:
+        """One candidate per (need, product_url). Returns True when NEW.
+        classification + gate_reasons preserve the relevance-gate verdict so
+        reports and the dashboard distinguish direct/partial/weak/unrelated
+        without re-running the gate."""
         import json
         with engine.begin() as connection:
             result = connection.execute(text(
                 "INSERT INTO buyer_product_matches (need_id, product_url, "
                 "product_name, merchant, verified_features, price_cents, "
                 "commission_cents, commission_note, match_score, "
-                "match_reasoning, missing_info, is_existing_campaign) "
+                "match_reasoning, missing_info, is_existing_campaign, "
+                "classification, gate_explanation, gate_reasons) "
                 "VALUES (:n, :u, :nm, :m, :vf::jsonb, :pc, :cc, :cn, :ms, "
-                ":mr, :mi::jsonb, :ex) "
+                ":mr, :mi::jsonb, :ex, :cls, :ge, :gr::jsonb) "
                 "ON CONFLICT (need_id, product_url) DO NOTHING RETURNING id"),
                 {"n": need_id, "u": product_url, "nm": product_name,
                  "m": merchant, "vf": json.dumps(verified_features or []),
                  "pc": price_cents, "cc": commission_cents,
                  "cn": commission_note, "ms": match_score, "mr": match_reasoning,
                  "mi": json.dumps(missing_info or []),
-                 "ex": is_existing_campaign})
+                 "ex": is_existing_campaign,
+                 "cls": classification, "ge": gate_explanation,
+                 "gr": json.dumps(gate_reasons or {})})
             return result.first() is not None
 
     def for_need(self, need_id: str) -> list:
+        """Direct matches first, then partial, weak, unrelated; score breaks
+        ties inside a class."""
         with engine.connect() as connection:
             rows = connection.execute(text(
                 "SELECT * FROM buyer_product_matches WHERE need_id = :n "
-                "ORDER BY match_score DESC"),
+                "ORDER BY CASE classification "
+                "WHEN 'direct_match' THEN 0 WHEN 'partial_match' THEN 1 "
+                "WHEN 'weak_match' THEN 2 ELSE 3 END, match_score DESC"),
                 {"n": need_id}).mappings().all()
         return [dict(r) for r in rows]
 

@@ -193,7 +193,11 @@ def run_buyer_intelligence(run_date: date = None, session=None) -> dict:
             verdicts = recommend_for_need(need, products[:MAX_PRODUCTS_PER_NEED])
             any_recommended = False
             for verdict in verdicts:
-                if verdict["match_score"] < 40:
+                # Relevance gate rules: only direct_match qualifies for
+                # promotion; partial retained as research; weak/unrelated
+                # recorded for transparency but NEVER recommended.
+                if verdict["classification"] not in ("direct_match",
+                                                     "partial_match"):
                     continue
                 product = verdict["product"]
                 matches_repo.insert(
@@ -209,9 +213,13 @@ def run_buyer_intelligence(run_date: date = None, session=None) -> dict:
                                  else product.get("price")),
                     match_score=verdict["match_score"],
                     match_reasoning=verdict["match_reasoning"],
-                    missing_info=verdict["missing_info"])
-                products_matched += 1
-                any_recommended = True
+                    missing_info=verdict["missing_info"],
+                    classification=verdict["classification"],
+                    gate_explanation=verdict.get("gate_explanation"),
+                    gate_reasons=verdict.get("gate_reasons"))
+                if verdict["classification"] == "direct_match":
+                    products_matched += 1
+                    any_recommended = True
             if not any_recommended:
                 unmet.append(need)
         except Exception:
@@ -322,6 +330,8 @@ def build_daily_report(run_date: date = None) -> str:
     lines.append("")
     lines.append("PRODUCT DISCOVERY FINDINGS")
     lines.append("-" * 60)
+    lines.append("(classifications: direct = promotable; partial = research "
+                 "only; weak/unrelated = rejected by the relevance gate)")
     found_any = False
     for n in needs[:5]:
         matches = matches_repo.for_need(n["id"])
@@ -329,9 +339,13 @@ def build_daily_report(run_date: date = None) -> str:
             found_any = True
             price = (f"${m['price_cents']/100:.2f}"
                      if m.get("price_cents") is not None else "UNVERIFIED")
+            cls = (m.get("classification") or "unclassified").upper()
             lines.append(f"\n- {m['product_name']} -> need: {n['title'][:60]}")
+            lines.append(f"  CLASSIFICATION: {cls} "
+                         f"{'(PROMOTABLE)' if m.get('classification') == 'direct_match' else '(NOT for promotion)'}")
             lines.append(f"  URL: {m['product_url']}")
-            lines.append(f"  Match score: {m['match_score']}/100")
+            lines.append(f"  Match score: {m['match_score']}/100 "
+                         f"(advisory only; gate classification governs)")
             lines.append(f"  Price: {price} | Merchant: "
                          f"{m.get('merchant') or 'unverified'}")
             if m.get('commission_cents') is not None:
@@ -340,12 +354,13 @@ def build_daily_report(run_date: date = None) -> str:
                 commission = 'unverified'
             lines.append(f"  Commission: {commission} "
                          f"{m.get('commission_note') or ''}")
+            lines.append(f"  Gate: {m.get('gate_explanation') or 'n/a'}")
             lines.append(f"  Why: {m['match_reasoning'][:200]}")
             missing = json.loads(m.get("missing_info") or "[]")
             if missing:
                 lines.append(f"  Missing info: {'; '.join(missing)}")
-            lines.append(f"  Already authorized campaign: "
-                         f"{bool(m.get('is_existing_campaign'))}")
+            lines.append(f"  Campaign status: "
+                         f"{'authorized campaign exists' if m.get('is_existing_campaign') else 'no authorized campaign (authorization is a separate owner decision)'}")
     if not found_any:
         lines.append("(no product matches yet)")
 

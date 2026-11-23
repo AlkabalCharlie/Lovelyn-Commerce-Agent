@@ -75,10 +75,18 @@ with tab_needs:
                     price = (f"${m['price_cents']/100:.2f}"
                              if m.get("price_cents") is not None
                              else "price unverified")
+                    cls = m.get("classification") or "unclassified"
+                    badge = {"direct_match": "🟢 DIRECT (promotable)",
+                             "partial_match": "🟡 PARTIAL (research only)",
+                             "weak_match": "🟠 WEAK (rejected)",
+                             "unrelated": "🔴 UNRELATED (rejected)"}.get(
+                        cls, cls)
                     st.markdown(
-                        f"- [{m['match_score']}/100] "
+                        f"- **{badge}** [{m['match_score']}/100] "
                         f"[{m['product_name']}]({m['product_url']}) — {price} "
-                        f"({'authorized campaign' if m['is_existing_campaign'] else 'not yet a campaign'})")
+                        f"({'authorized campaign' if m['is_existing_campaign'] else 'no authorized campaign (separate owner decision)'})")
+                    if m.get("gate_explanation"):
+                        st.caption(f"Gate: {m['gate_explanation']}")
                     st.caption(m["match_reasoning"])
                     missing = json.loads(m.get("missing_info") or "[]")
                     if missing:

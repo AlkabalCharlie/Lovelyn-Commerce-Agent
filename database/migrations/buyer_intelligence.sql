@@ -130,3 +130,13 @@ DO $$ BEGIN
             FOR ALL TO authenticated USING (true) WITH CHECK (true);
     END IF;
 END $$;
+
+-- v2 (relevance gate): store the gate verdict with every match.
+ALTER TABLE buyer_product_matches ADD COLUMN IF NOT EXISTS classification text
+    NOT NULL DEFAULT 'weak_match'
+    CHECK (classification IN ('direct_match','partial_match','weak_match','unrelated'));
+ALTER TABLE buyer_product_matches ADD COLUMN IF NOT EXISTS gate_explanation text;
+ALTER TABLE buyer_product_matches ADD COLUMN IF NOT EXISTS gate_reasons jsonb
+    NOT NULL DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS idx_buyer_matches_classification
+    ON buyer_product_matches (need_id, classification);
