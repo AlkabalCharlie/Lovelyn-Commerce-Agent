@@ -475,6 +475,19 @@ def run_daily_grind():
                                           "wait in queue (owner setup: services/youtube_upload.py docstring).")
     except Exception as exc:
         log_repo.log_action("SHORTS", f"Shorts pipeline step failed (non-fatal): {type(exc).__name__}.")
+    # 4.8 Buyer intelligence (AIDA research -> scoring -> product matching ->
+    # daily email). Entirely NON-FATAL: a research or email failure never
+    # interrupts campaign distribution or publishing. Idempotent per day:
+    # reruns the same date are no-ops (buyer_intel_runs.run_date UNIQUE).
+    try:
+        from services.buyer_intelligence_daily import run_buyer_intelligence
+        intel = run_buyer_intelligence()
+        skipped = intel.get("skipped_reason")
+        if skipped:
+            log_repo.log_action("BUYER_INTEL", f"Skipped: {skipped}.")
+    except Exception as exc:
+        log_repo.log_action("BUYER_INTEL",
+                            f"Buyer intelligence step failed (non-fatal): {type(exc).__name__}.")
 
     # 5. Milestone celebrations (each threshold celebrated once per stream)
     week_ago = now.date() - timedelta(days=7)

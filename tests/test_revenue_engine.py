@@ -11,6 +11,15 @@ from services.publishing_queue import (
 )
 from services.demand_matcher import score_demand
 
+def _delete_queue_row(title: str) -> None:
+    # Tests must never leave artifacts in the LIVE publishing_queue
+    # (test_queue_hygiene regression-guards this).
+    from sqlalchemy import text as _text
+    from database.connection import engine as _engine
+    with _engine.begin() as c:
+        c.execute(_text("DELETE FROM publishing_queue WHERE title = :t"),
+                  {"t": title})
+
 
 # --- 1. Unauthorized campaigns cannot be promoted ------------------------
 
@@ -64,9 +73,12 @@ def test_queue_idempotent_and_owner_only_publication():
     cid = "66d125ce-0523-492b-9679-3bd06d75e1be"
     pkg = {"format_type": "youtube_shorts_script", "title": "t"}
     slug = f"test-slug-{__import__('random').randint(10000, 99999)}"
-    assert queue_package("youtube", cid, slug, "script", pkg) is True
-    assert queue_package("youtube", cid, slug, "script", pkg) is False  # retry = no-op
-    assert queue_package("youtube", cid, slug, "script", pkg) is False
+    try:
+        assert queue_package("youtube", cid, slug, "script", pkg) is True
+        assert queue_package("youtube", cid, slug, "script", pkg) is False  # retry = no-op
+        assert queue_package("youtube", cid, slug, "script", pkg) is False
+    finally:
+        _delete_queue_row(slug)
 
 
 def test_queue_rejects_invalid_channel():
@@ -86,13 +98,17 @@ def test_mark_published_requires_queued_status():
 def test_content_packages_fact_bounded():
     from services.content_packages import PRODUCT_FACTS, youtube_script_package
     tv = "b8d56c20-c801-4c97-ac8f-936bb5c36cba"
-    pkg = youtube_script_package(tv, "https://lovelyn.matchqip.com/campaign-b8d56c20-c801-4c97-ac8f-936bb5c36cba.html",
-                                 "t", "test-tv-pkg-x")
-    assert pkg is not None
-    # every fact line must be one of the VERIFIED facts, no invention
-    assert all(f in PRODUCT_FACTS[tv]["facts"] for f in
-               [s["on_screen"] for s in pkg["scenes"] if s["on_screen"].startswith(("Free", "Essential", "Paid", "Community"))])
-    assert "affiliate" in pkg["disclosure"].lower()
+    slug = "test-tv-pkg-x"
+    try:
+        pkg = youtube_script_package(tv, "https://lovelyn.matchqip.com/campaign-b8d56c20-c801-4c97-ac8f-936bb5c36cba.html",
+                                     "t", slug)
+        assert pkg is not None
+        # every fact line must be one of the VERIFIED facts, no invention
+        assert all(f in PRODUCT_FACTS[tv]["facts"] for f in
+                   [s["on_screen"] for s in pkg["scenes"] if s["on_screen"].startswith(("Free", "Essential", "Paid", "Community"))])
+        assert "affiliate" in pkg["disclosure"].lower()
+    finally:
+        _delete_queue_row(slug)
 
 
 # --- 4. Financial integrity guards remain -------------------------------
@@ -177,29 +193,38 @@ def test_opportunity_changes_generated_content_and_association():
                 "source_url": "https://www.reddit.com/r/debtfree/x2",
                 "score": 55, "intent_score": 22, "intent_categories": ["seeking_solution"]}
 
-    tv_pkg = opportunity_youtube_script(TV_CID, f"https://lovelyn.matchqip.com/campaign-{TV_CID}.html",
-                                        opp_tv, f"test-opp-tv-{opp_tv['score']}")
-    debt_pkg = opportunity_blogger_draft(DEBT_CID, f"https://lovelyn.matchqip.com/campaign-{DEBT_CID}.html",
-                                         opp_debt, f"test-opp-debt-{opp_debt['score']}")
-    # Campaign association follows the opportunity's matched campaign
-    assert tv_pkg["opportunity"]["source_url"] == opp_tv["source_url"]
-    assert debt_pkg["opportunity"]["source_url"] == opp_debt["source_url"]
-    # Content differs per opportunity: TV hook quotes its question, debt
-    # draft contains the honest format-difference section
-    assert opp_tv["title"][:40] in tv_pkg["hook"]
-    assert any("spreadsheet" in s and "worksheets" in s
-               for s in [debt_pkg["body_markdown"]][0].split("\n\n"))
-    assert debt_pkg["origin"] == "demand_opportunity"
-    assert tv_pkg["origin"] == "demand_opportunity"
+    slug_tv, slug_debt = f"test-opp-tv-{opp_tv['score']}", f"test-opp-debt-{opp_debt['score']}"
+    try:
+        tv_pkg = opportunity_youtube_script(TV_CID, f"https://lovelyn.matchqip.com/campaign-{TV_CID}.html",
+                                            opp_tv, slug_tv)
+        debt_pkg = opportunity_blogger_draft(DEBT_CID, f"https://lovelyn.matchqip.com/campaign-{DEBT_CID}.html",
+                                             opp_debt, slug_debt)
+        # Campaign association follows the opportunity's matched campaign
+        assert tv_pkg["opportunity"]["source_url"] == opp_tv["source_url"]
+        assert debt_pkg["opportunity"]["source_url"] == opp_debt["source_url"]
+        # Content differs per opportunity: TV hook quotes its question, debt
+        # draft contains the honest format-difference section
+        assert opp_tv["title"][:40] in tv_pkg["hook"]
+        assert any("spreadsheet" in s and "worksheets" in s
+                   for s in [debt_pkg["body_markdown"]][0].split("\n\n"))
+        assert debt_pkg["origin"] == "demand_opportunity"
+        assert tv_pkg["origin"] == "demand_opportunity"
+    finally:
+        _delete_queue_row(slug_tv)
+        _delete_queue_row(slug_debt)
 
 
 def test_evergreen_package_labelled_and_no_opportunity_claim():
     from services.content_packages import youtube_script_package
-    pkg = youtube_script_package(TV_CID, f"https://lovelyn.matchqip.com/campaign-{TV_CID}.html",
-                                 "Evergreen topic", "test-evergreen-label",
-                                 evergreen=True)
-    assert pkg["origin"] == "evergreen_campaign_asset"
-    assert pkg["opportunity"] is None
+    slug = "test-evergreen-label"
+    try:
+        pkg = youtube_script_package(TV_CID, f"https://lovelyn.matchqip.com/campaign-{TV_CID}.html",
+                                     "Evergreen topic", slug,
+                                     evergreen=True)
+        assert pkg["origin"] == "evergreen_campaign_asset"
+        assert pkg["opportunity"] is None
+    finally:
+        _delete_queue_row(slug)
 
 
 def test_agent_calls_score_demand_and_uses_result():

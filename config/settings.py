@@ -64,3 +64,12 @@ COMBINED_MONTHLY_TARGET_CENTS = int(_get_setting("COMBINED_MONTHLY_TARGET_CENTS"
 
 # Milestones
 MILESTONE_THRESHOLDS_CENTS = [10000, 50000, 100000, 500000, 1000000]  # $100, $500, $1K, $5K, $10K
+# ---- Buyer intelligence (AIDA engine) ----
+# Gmail report sender (services/gmail_report.py). SEPARATE OAuth grant from
+# YouTube: an existing youtube.upload refresh token does NOT grant gmail.send.
+GMAIL_CLIENT_ID = _get_setting("GMAIL_CLIENT_ID")
+GMAIL_CLIENT_SECRET = _get_setting("GMAIL_CLIENT_SECRET")
+GMAIL_REFRESH_TOKEN = _get_setting("GMAIL_REFRESH_TOKEN")
+GMAIL_CLIENT_SECRET_FILE = _get_setting("GMAIL_CLIENT_SECRET_FILE")
+# Report recipient is PINNED: research findings never go to third parties.
+REPORT_RECIPIENT = _get_setting("REPORT_RECIPIENT", "chuka.cokafor@gmail.com")
