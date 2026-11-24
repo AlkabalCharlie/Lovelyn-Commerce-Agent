@@ -1,0 +1,10 @@
+{
+  "run_date": "2026-11-23",
+  "evidence": 2,
+  "needs": 15,
+  "matched": 0,
+  "unmet": 15,
+  "email_sent": false,
+  "email_reason": "TypeError: the JSON object must be str, bytes or bytearray, not list",
+  "skipped_reason": null
+}

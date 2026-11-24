@@ -317,7 +317,9 @@ def build_daily_report(run_date: date = None) -> str:
                      f"({score_band(n['intent_score'])})")
         lines.append(f"   Confidence   : {n['confidence']} "
                      f"({n['evidence_count']} independent discussion(s))")
-        urls = json.loads(n.get("source_urls") or "[]")
+        urls = n.get("source_urls") or []
+        if isinstance(urls, str):
+            urls = json.loads(urls)
         for u in urls[:3]:
             lines.append(f"   Evidence     : {u}")
         feats = json.loads(n.get("desired_features") or "[]")

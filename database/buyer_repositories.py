@@ -29,8 +29,8 @@ class BuyerEvidenceRepository:
                 "INSERT INTO buyer_evidence (dedupe_key, source, source_url, "
                 "author, title, body, context, published_at, aida_stage, raw_scores) "
                 "VALUES (:k, :s, :u, :a, :t, :b, :c, "
-                "COALESCE(:p::timestamptz, now()), :stage, "
-                "COALESCE(:raw::jsonb, '{}'::jsonb)) "
+                "COALESCE(CAST(:p AS timestamptz), now()), :stage, "
+                "COALESCE(CAST(:raw AS jsonb), '{}'::jsonb)) "
                 "ON CONFLICT (dedupe_key) DO NOTHING RETURNING id"),
                 {"k": dedupe_key, "s": source, "u": source_url, "a": author,
                  "t": title, "b": body, "c": context, "p": published_at,
@@ -69,9 +69,11 @@ class BuyerNeedsRepository:
                 "confidence, evidence_count, source_urls, latest_evidence_at, "
                 "desired_features, price_sensitivity, common_objections, "
                 "unmet_aspects, suggested_categories) "
-                "VALUES (:id, :ck, :t, :pd, :ta, :st, :sc, :sr, :ovi::jsonb, "
-                ":cf, :ec, :su::jsonb, COALESCE(:le::timestamptz, now()), "
-                ":df::jsonb, :ps, :co::jsonb, :um::jsonb, :sgc::jsonb) "
+                "VALUES (:id, :ck, :t, :pd, :ta, :st, :sc, :sr, "
+                "CAST(:ovi AS jsonb), "
+                ":cf, :ec, CAST(:su AS jsonb), COALESCE(CAST(:le AS timestamptz), now()), "
+                "CAST(:df AS jsonb), :ps, CAST(:co AS jsonb), CAST(:um AS jsonb), "
+                "CAST(:sgc AS jsonb) ) "
                 "ON CONFLICT (cluster_key) DO UPDATE SET "
                 "title = EXCLUDED.title, "
                 "problem_description = EXCLUDED.problem_description, "
@@ -148,8 +150,8 @@ class BuyerProductMatchRepository:
                 "commission_cents, commission_note, match_score, "
                 "match_reasoning, missing_info, is_existing_campaign, "
                 "classification, gate_explanation, gate_reasons) "
-                "VALUES (:n, :u, :nm, :m, :vf::jsonb, :pc, :cc, :cn, :ms, "
-                ":mr, :mi::jsonb, :ex, :cls, :ge, :gr::jsonb) "
+                "VALUES (:n, :u, :nm, :m, CAST(:vf AS jsonb), :pc, :cc, :cn, :ms, "
+                ":mr, CAST(:mi AS jsonb), :ex, :cls, :ge, CAST(:gr AS jsonb)) "
                 "ON CONFLICT (need_id, product_url) DO NOTHING RETURNING id"),
                 {"n": need_id, "u": product_url, "nm": product_name,
                  "m": merchant, "vf": json.dumps(verified_features or []),
@@ -193,7 +195,8 @@ class BuyerIntelRunRepository:
         with engine.begin() as connection:
             connection.execute(text(
                 "UPDATE buyer_intel_runs SET finished_at = now(), "
-                "sources_ok = :ok::jsonb, sources_failed = :bad::jsonb, "
+                "sources_ok = CAST(:ok AS jsonb), sources_failed = "
+                "CAST(:bad AS jsonb), "
                 "evidence_collected = :ev, needs_upserted = :nn, "
                 "products_matched = :pm, unmet_opportunities = :uo "
                 "WHERE run_date = :d"),
