@@ -285,6 +285,30 @@ def run_daily_grind():
     except Exception as exc:
         log_repo.log_action("QUEUE", f"Publishing queue step skipped: {type(exc).__name__}.")
 
+    # 3.7 Direct publishing (Blogger articles + Pinterest pins). NON-FATAL and
+    # strictly gated: promotion_approved + verified product facts only, and
+    # Blogger posts are created as DRAFTS unless BLOGGER_PUBLISH_LIVE=true.
+    try:
+        from services.publishing_service import run_publishing
+        pub = run_publishing(
+            camp_repo,
+            blogger_as_draft=os.getenv("BLOGGER_PUBLISH_LIVE", "false")
+            .lower() != "true")
+        for channel, res in pub.items():
+            n = len(res.get("published") or [])
+            skipped = len(res.get("skipped") or [])
+            failed = len(res.get("failed") or [])
+            if res.get("reason") and not n:
+                log_repo.log_action("PUBLISH",
+                                    f"{channel}: not published ({res['reason'][:120]}).")
+            elif n or failed or skipped:
+                log_repo.log_action("PUBLISH",
+                                    f"{channel}: published={n} failed={failed} "
+                                    f"skipped={skipped}.")
+    except Exception as exc:
+        log_repo.log_action("PUBLISH",
+                            f"Publishing step failed (non-fatal): {type(exc).__name__}.")
+
     # 4. Revenue-aware kill/scale on real traffic — revenue truth is computed
     # LIVE from verified financial_events only (excluding tests/refunds), so a
     # stale or test-contaminated campaigns.revenue_cents column can NEVER

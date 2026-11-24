@@ -73,3 +73,17 @@ GMAIL_REFRESH_TOKEN = _get_setting("GMAIL_REFRESH_TOKEN")
 GMAIL_CLIENT_SECRET_FILE = _get_setting("GMAIL_CLIENT_SECRET_FILE")
 # Report recipient is PINNED: research findings never go to third parties.
 REPORT_RECIPIENT = _get_setting("REPORT_RECIPIENT", "chuka.cokafor@gmail.com")
+
+# ---- Blogger / Pinterest publishing ----
+BLOGGER_CLIENT_ID = _get_setting("BLOGGER_CLIENT_ID")
+BLOGGER_CLIENT_SECRET = _get_setting("BLOGGER_CLIENT_SECRET")
+BLOGGER_REFRESH_TOKEN = _get_setting("BLOGGER_REFRESH_TOKEN")
+BLOGGER_CLIENT_SECRET_FILE = _get_setting("BLOGGER_CLIENT_SECRET_FILE")
+BLOGGER_BLOG_ID = _get_setting("BLOGGER_BLOG_ID")
+PINTEREST_CLIENT_ID = _get_setting("PINTEREST_CLIENT_ID")
+PINTEREST_CLIENT_SECRET = _get_setting("PINTEREST_CLIENT_SECRET")
+PINTEREST_REFRESH_TOKEN = _get_setting("PINTEREST_REFRESH_TOKEN")
+PINTEREST_REDIRECT_URI = _get_setting("PINTEREST_REDIRECT_URI",
+                                      "http://localhost:8080/")
+PINTEREST_BOARD_ID = _get_setting("PINTEREST_BOARD_ID")
+PINTEREST_IMAGE_BASE_URL = _get_setting("PINTEREST_IMAGE_BASE_URL")

@@ -172,3 +172,111 @@ def claim_next_rendered_for_upload() -> dict | None:
             "AND status = 'rendered' AND video_path IS NOT NULL "
             "ORDER BY created_at ASC LIMIT 1")).mappings().first()
         return dict(row) if row else None
+
+
+# ---- Blogger / Pinterest publishing extensions (additive) -----------------
+
+def ensure_publish_columns() -> None:
+    """Additive columns for direct publishing. Safe to call every run.
+    `external_id` carries the platform post/pin id (blogger post id, pin id,
+    youtube video id) and is uniquely indexed per channel+id so a retried
+    job can never create a second post."""
+    with engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE publishing_queue ADD COLUMN IF NOT EXISTS external_id TEXT"))
+        connection.execute(text(
+            "ALTER TABLE publishing_queue ADD COLUMN IF NOT EXISTS published_url TEXT"))
+        connection.execute(text(
+            "ALTER TABLE publishing_queue ADD COLUMN IF NOT EXISTS publish_attempts INT DEFAULT 0"))
+        connection.execute(text(
+            "ALTER TABLE publishing_queue ADD COLUMN IF NOT EXISTS last_error TEXT"))
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_queue_channel_external "
+            "ON publishing_queue (channel, external_id) "
+            "WHERE external_id IS NOT NULL"))
+
+
+def has_published(channel: str, title: str) -> dict | None:
+    """Idempotency probe: has this exact package already been published?"""
+    ensure_publish_columns()
+    with engine.connect() as connection:
+        row = connection.execute(text(
+            "SELECT id, external_id, publication_url, published_at "
+            "FROM publishing_queue WHERE channel = :ch AND title = :t "
+            "AND status = 'published' AND external_id IS NOT NULL LIMIT 1"),
+            {"ch": channel, "t": title}).mappings().first()
+    return dict(row) if row else None
+
+
+def mark_published_external(queue_id: str, external_id: str,
+                            publication_url: str) -> bool:
+    """Atomically record a successful platform publication. Guarded by
+    external_id IS NULL so a concurrent/retried attempt cannot overwrite an
+    existing publication record or create a duplicate."""
+    ensure_publish_columns()
+    with engine.begin() as connection:
+        result = connection.execute(text(
+            "UPDATE publishing_queue SET status = 'published', "
+            "external_id = :eid, publication_url = :u, published_url = :u, "
+            "published_at = now(), last_error = NULL "
+            "WHERE id = :id AND external_id IS NULL"),
+            {"eid": external_id, "u": publication_url, "id": queue_id})
+        return result.rowcount == 1
+
+
+def mark_publish_failed(queue_id: str, error: str) -> bool:
+    """Record an actionable error and count the attempt; the row stays
+    'queued' so a later run may retry, but never re-publishes if a prior
+    attempt already recorded an external_id."""
+    ensure_publish_columns()
+    with engine.begin() as connection:
+        result = connection.execute(text(
+            "UPDATE publishing_queue SET "
+            "publish_attempts = COALESCE(publish_attempts, 0) + 1, "
+            "last_error = :e WHERE id = :id AND status = 'queued'"),
+            {"e": (error or "")[:1000], "id": queue_id})
+        return result.rowcount == 1
+
+
+def claim_unpublished(channel: str, limit: int = 3) -> list:
+    """Oldest queued rows for a channel that have never been published.
+    Rows with an external_id are excluded (hard duplicate guard)."""
+    ensure_publish_columns()
+    ensure_queue_table()
+    with engine.connect() as connection:
+        rows = connection.execute(text(
+            "SELECT id, channel, campaign_id, title, format, package, "
+            "COALESCE(publish_attempts, 0) AS publish_attempts "
+            "FROM publishing_queue WHERE channel = :ch AND status = 'queued' "
+            "AND external_id IS NULL "
+            "ORDER BY created_at ASC LIMIT :limit"),
+            {"ch": channel, "limit": limit}).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def publication_report() -> dict:
+    """Coarse, honest counts PER STAGE (prepared / published / failed).
+    Never conflates published with sold: revenue comes only from
+    financial_events."""
+    ensure_publish_columns()
+    with engine.connect() as connection:
+        rows = connection.execute(text(
+            "SELECT channel, status, count(*) AS n FROM publishing_queue "
+            "WHERE channel IN ('blogger', 'pinterest') "
+            "GROUP BY channel, status")).mappings().all()
+    out = {}
+    for r in rows:
+        out.setdefault(r["channel"], {})[r["status"]] = r["n"]
+    return out
+
+
+def list_publications(channel: str, limit: int = 50) -> list:
+    ensure_publish_columns()
+    with engine.connect() as connection:
+        rows = connection.execute(text(
+            "SELECT id, title, publication_url, external_id, published_at, "
+            "last_error FROM publishing_queue "
+            "WHERE channel = :ch AND status = 'published' "
+            "ORDER BY published_at DESC NULLS LAST LIMIT :limit"),
+            {"ch": channel, "limit": limit}).mappings().all()
+    return [dict(r) for r in rows]
