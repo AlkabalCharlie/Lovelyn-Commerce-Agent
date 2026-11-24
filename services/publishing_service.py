@@ -49,6 +49,33 @@ def _authorized(camp_repo, campaign_id: str) -> bool:
     return camp_repo.is_promotion_approved(campaign_id)
 
 
+def check_article_quality(pkg: dict, html_body: str) -> dict:
+    """Editorial quality gate for a queued Blogger package.
+
+    Accepts BOTH article shapes:
+      - editorial long-form (body_html already produced by
+        services.editorial_articles + validated there)
+      - legacy markdown packages (body_markdown), which must pass the full
+        editorial standard before publication.
+    Returns {ok, failures}.
+    """
+    from services.editorial_articles import validate_article
+
+    if pkg.get("format_type") == "blogger_article_html" and \
+            pkg.get("body_html"):
+        return validate_article(pkg)
+
+    # Legacy markdown package: validate the converted HTML as an article.
+    legacy = {
+        "body_html": html_body,
+        "campaign_url": pkg.get("campaign_url") or "",
+        "disclosure": pkg.get("disclosure") or "",
+        "featured_image_url": pkg.get("featured_image_url") or "",
+        "featured_image_alt": pkg.get("featured_image_alt") or "",
+    }
+    return validate_article(legacy)
+
+
 def publish_blogger_drafts(camp_repo, blog_id: str | None = None,
                            limit: int = BLOGGER_ARTICLE_MAX,
                            as_draft: bool = True) -> dict:
@@ -82,6 +109,17 @@ def publish_blogger_drafts(camp_repo, blog_id: str | None = None,
             continue
         html_body = blogger_publisher.markdown_to_html(
             pkg.get("body_markdown") or pkg.get("body") or "")
+        # QUALITY GATE: an article must meet the editorial standard before it
+        # can be published (length, structure, disclosure, valid destination,
+        # featured image). Thin/legacy packages are queued for revision, not
+        # sent to Blogger.
+        quality = check_article_quality(pkg, html_body)
+        if not quality["ok"]:
+            result["skipped"].append(
+                {"id": str(row["id"]),
+                 "reason": "quality_gate: " + "; ".join(quality["failures"])
+                 [:300]})
+            continue
         try:
             posted = blogger_publisher.publish_post(
                 blog_id, title, html_body,

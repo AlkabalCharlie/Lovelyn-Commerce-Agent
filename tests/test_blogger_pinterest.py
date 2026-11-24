@@ -231,8 +231,17 @@ class TestPinterest:
 
 # -------------------------------------- publishing service safety chain ----
 def _pkg(**over):
-    base = {"title": "T", "body_markdown": "Body paragraph.",
-            "labels": ["finance"], "campaign_url": TV_URL}
+    """A package that satisfies the editorial quality gate."""
+    from services.editorial_articles import debt_payoff_article
+    art = debt_payoff_article(TV_URL, "https://lovelyn.matchqip.com/a.png",
+                              "alt")
+    base = {"format_type": "blogger_article_html",
+            "title": art["title"], "body_html": art["body_html"],
+            "body_markdown": art["body_html"],
+            "labels": ["finance"], "campaign_url": TV_URL,
+            "featured_image_url": art["featured_image_url"],
+            "featured_image_alt": art["featured_image_alt"],
+            "disclosure": art["disclosure"]}
     base.update(over)
     return base
 
